@@ -694,21 +694,68 @@ app.get('/api/zones', (req, res) => {
   });
 });
 
+// 智能查找开发区数据文件（支持带时间戳的文件名）
+function findZoneDataFile(areaName) {
+  const safeFileName = areaName.replace(/[^\w\u4e00-\u9fa5]/g, '_');
+  const zoneDataDir = path.join(__dirname, 'uploads', 'zone-data');
+
+  // 1. 首先尝试精确匹配
+  let filePath = path.join(zoneDataDir, `${safeFileName}.json`);
+  if (fs.existsSync(filePath)) {
+    return filePath;
+  }
+
+  // 2. 尝试查找带时间戳的文件
+  try {
+    const files = fs.readdirSync(zoneDataDir);
+    const matchingFiles = files.filter(file => {
+      const baseName = file.replace(/\.json$/, '');
+      return baseName.startsWith(safeFileName + '_') && /^\d+$/.test(baseName.substring(safeFileName.length + 1));
+    });
+
+    if (matchingFiles.length > 0) {
+      // 按修改时间排序，选择最新的
+      matchingFiles.sort((a, b) => {
+        const statA = fs.statSync(path.join(zoneDataDir, a));
+        const statB = fs.statSync(path.join(zoneDataDir, b));
+        return statB.mtime - statA.mtime;
+      });
+
+      console.log(`找到带时间戳的文件: ${matchingFiles[0]}`);
+      return path.join(zoneDataDir, matchingFiles[0]);
+    }
+  } catch (error) {
+    console.error('搜索文件时出错:', error);
+  }
+
+  return null;
+}
+
 // 获取开发区完整数据
 app.get('/api/zones/:areaName/data', (req, res) => {
   const areaName = decodeURIComponent(req.params.areaName);
-  const safeFileName = areaName.replace(/[^\w\u4e00-\u9fa5]/g, '_');
-  const filePath = path.join(__dirname, 'uploads', 'zone-data', `${safeFileName}.json`);
+
+  console.log(`请求开发区数据: ${areaName}`);
+
+  const filePath = findZoneDataFile(areaName);
+
+  if (!filePath) {
+    console.log(`未找到开发区数据文件: ${areaName}`);
+    return res.status(404).json({ error: '未找到开发区数据' });
+  }
 
   fs.readFile(filePath, 'utf-8', (err, data) => {
     if (err) {
-      return res.status(404).json({ error: '未找到开发区数据' });
+      console.error(`读取文件失败: ${filePath}`, err);
+      return res.status(500).json({ error: '读取文件失败' });
     }
 
     try {
       const zoneData = JSON.parse(data);
+      console.log(`成功读取开发区数据: ${areaName}`);
       res.json(zoneData);
     } catch (parseError) {
+      console.error(`解析JSON失败: ${filePath}`, parseError);
       res.status(500).json({ error: '数据解析失败' });
     }
   });
@@ -719,16 +766,24 @@ app.put('/api/zones/:areaName/data', (req, res) => {
   const areaName = decodeURIComponent(req.params.areaName);
   const updatedData = req.body;
 
-  const safeFileName = areaName.replace(/[^\w\u4e00-\u9fa5]/g, '_');
-  const filePath = path.join(__dirname, 'uploads', 'zone-data', `${safeFileName}.json`);
+  console.log(`更新开发区数据: ${areaName}`);
+
+  const filePath = findZoneDataFile(areaName);
+
+  if (!filePath) {
+    console.log(`未找到要更新的开发区数据文件: ${areaName}`);
+    return res.status(404).json({ error: '未找到开发区数据' });
+  }
 
   // 添加更新时间
   updatedData.lastUpdated = new Date().toISOString();
 
   fs.writeFile(filePath, JSON.stringify(updatedData, null, 2), 'utf-8', (err) => {
     if (err) {
+      console.error(`保存文件失败: ${filePath}`, err);
       return res.status(500).json({ error: '保存失败' });
     }
+    console.log(`成功更新开发区数据: ${areaName}`);
     res.json({ success: true, message: '数据更新成功' });
   });
 });
@@ -767,20 +822,29 @@ app.get('/api/zones/:areaName/potentials', async (req, res) => {
 
 // 加载开发区数据
 async function loadZoneData(areaName) {
-  const safeFileName = areaName.replace(/[^\w\u4e00-\u9fa5]/g, '_');
-  const filePath = path.join(__dirname, 'uploads', 'zone-data', `${safeFileName}.json`);
+  console.log(`加载开发区数据: ${areaName}`);
+
+  const filePath = findZoneDataFile(areaName);
+
+  if (!filePath) {
+    console.log(`未找到开发区数据文件: ${areaName}`);
+    throw new Error('未找到开发区数据');
+  }
 
   return new Promise((resolve, reject) => {
     fs.readFile(filePath, 'utf-8', (err, data) => {
       if (err) {
-        reject(new Error('未找到开发区数据'));
+        console.error(`读取开发区数据文件失败: ${filePath}`, err);
+        reject(new Error('读取开发区数据失败'));
         return;
       }
 
       try {
         const jsonData = JSON.parse(data);
+        console.log(`成功加载开发区数据: ${areaName}`);
         resolve(jsonData);
       } catch (parseError) {
+        console.error(`解析开发区数据失败: ${filePath}`, parseError);
         reject(new Error('解析开发区数据失败'));
       }
     });
