@@ -8,7 +8,7 @@
       <div v-if="properties && Object.keys(properties).length > 0">
         <div class="property-item" v-for="(value, key) in properties" :key="key">
           <span class="property-label">{{ formatKey(key) }}:</span>
-          <span class="property-value">{{ value }}</span>
+          <span class="property-value">{{ formatValue(key, value) }}</span>
         </div>
       </div>
       <div v-else class="no-properties">
@@ -63,9 +63,73 @@ defineEmits(['close', 'showIndicators', 'showPotentials', 'showEditor'])
 const formatKey = (key) => {
   // 去掉属性名前面的下划线
   const cleanKey = key.startsWith('_') ? key.substring(1) : key
+
+  // 固定字段映射为中文
+  const fieldMapping = {
+    'KFQMC': '开发区名称',
+    'KFQDM': '开发区代码',
+    'KFQJB': '开发区级别',
+    'SZQXMC': '所在区县名称',
+    'SZQXDM': '所在区县代码',
+    'SZSMC': '所在省份名称',
+    'province': '所在省份',
+    'Class': '土地利用类型'
+  }
+
   
-  // 直接返回清理后的键名，不进行中文映射
-  return cleanKey
+  // 返回映射后的字段名或原始字段名
+  return fieldMapping[cleanKey] || cleanKey
+}
+
+// 格式化属性值
+const formatValue = (key, value) => {
+  // 对于Class字段，需要进一步映射类型值
+  if (key === 'Class') {
+    const classMapping = {
+      'A1': '水田',
+      'A2': '水浇地',
+      'A3': '旱地',
+      'K': '果园',
+      'L': '茶园',
+      'M': '其他园地',
+      'N21': '有林地',
+      'N22': '灌木林地',
+      'N23': '其他林地',
+      'N31': '天然牧草地',
+      'N32': '人工牧草地',
+      'N33': '其他草地',
+      'H1': '商业服务业设施用地',
+      'H2': '工业用地',
+      'H3': '物流仓储用地',
+      'H4': '城镇住宅用地',
+      'H5': '公共管理与公共服务用地',
+      'H6': '公用设施用地',
+      'H7': '公园绿地',
+      'H8': '广场用地',
+      'H9': '交通运输用地',
+      'HA': '空留地',
+      'HB': '特殊用地',
+      'HC': '空闲地',
+      'HD': '其他建设用地',
+      'E1': '河流水面',
+      'E2': '湖泊水面',
+      'E3': '水库水面',
+      'E4': '坑塘水面',
+      'E5': '沿海滩涂',
+      'E6': '内陆滩涂',
+      'E7': '沟渠',
+      'E8': '沼泽地',
+      'E9': '冰川与永久积雪',
+      'EA': '盐田',
+      'EB': '沙地',
+      'EC': '裸土地',
+      'ED': '裸岩石砾地'
+    }
+    return classMapping[value] || value
+  }
+
+  // 对于其他字段，直接返回值
+  return value || '无'
 }
 </script>
 

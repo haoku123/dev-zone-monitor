@@ -250,7 +250,7 @@ onMounted(async () => {
     // 后端未��现可忽略
   }
 
-  // 1) 加载后端已保存数据
+  // 1) 加载后端已保存数据的列表（不加载具体数据）
   try {
     // 先获取索引文件
     const indexList = await fetchGeojsonIndex()
@@ -260,70 +260,23 @@ onMounted(async () => {
       console.warn('⚠️ 后端返回的索引数据不是数组格式:', indexList)
       console.log('跳过后端数据加载')
     } else {
-      // 根据索引逐个加载开发区数据
+      // 只加载列表，不加载具体的GeoJSON数据
       for (const item of indexList) {
-        try {
-          const areaData = await fetchGeojson(item.name)
-        
-        if (!areaData || !areaData.geojson) continue
-        
-        const dataSource = await Cesium.GeoJsonDataSource.load(areaData.geojson, { clampToGround: false })
-        viewerRef.value.dataSources.add(dataSource)
-
-        // 记录该开发区是否已添加到列表中
-        let areaAdded = false;
-
-        for (const entity of dataSource.entities.values) {
-          const props = entity.properties
-          const name = props?.KFQMC?.getValue?.() || areaData.name
-          const province = props?.province?.getValue?.() || ''
-          
-          // 尝试多种可能的属性名获取Class值
-          let classValue = undefined
-          if (props?.Class && typeof props.Class.getValue === 'function') {
-            classValue = props.Class.getValue()
-          } else if (props?.class && typeof props.class.getValue === 'function') {
-            classValue = props.class.getValue()
-          } else if (props?.CLASS && typeof props.CLASS.getValue === 'function') {
-            classValue = props.CLASS.getValue()
-          }
-          
-          // 确保classValue是数字
-          if (classValue !== undefined) {
-            classValue = Number(classValue)
-          }
-          
-          console.log(`实体 ${name} 的Class值:`, classValue)
-
-          if (name && entity.polygon && !deletedList.includes(name)) {
-            // 只有第一次遇到该名称时才添加到列表中
-            if (!seenNames.has(name)) {
-              areaList.value.push(name)
-              entityMap.value[name] = entity
-              areaMeta.value[name] = { province }
-              seenNames.add(name)
-              areaAdded = true;
+        if (!deletedList.includes(item.name)) {
+          if (!seenNames.has(item.name)) {
+            areaList.value.push(item.name)
+            // 添加元数据（如果有的话）
+            areaMeta.value[item.name] = {
+              province: item.province || '未知',
+              uploadTime: item.uploadTime,
+              source: item.source
             }
-            
-            // 无论是否已添加到列表，都设置颜色
-            // 根据Class属性设置颜色
-            if (classValue !== undefined && !isNaN(classValue)) {
-              console.log(`为实体 ${name} 设置颜色:`, classValue)
-              const color = getColorByClass(classValue)
-              console.log(`选择的颜色:`, color)
-              entity.polygon.material = new Cesium.ColorMaterialProperty(color)
-            } else {
-              entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.5))
-            }
-            
-            entity.polygon.outline = false
+            seenNames.add(item.name)
           }
         }
-      } catch (err) {
-        console.error(`❌ 加载开发区 ${item.name} 失败:`, err)
       }
+      console.log(`✅ 加载了 ${areaList.value.length} 个开发区到列表`)
     }
-    } // 结束else块
   } catch (err) {
     console.error('❌ 获取后端数据失败:', err)
   }
@@ -366,17 +319,36 @@ onMounted(async () => {
           
           console.log(`导入的实体 ${name} 的Class值:`, classValue)
           
-          // 根据Class属性设置颜色
+          // 根据Class属性设置颜色 - 支持Polygon和MultiPolygon
           if (classValue !== undefined && !isNaN(classValue)) {
             console.log(`为导入的实体 ${name} 设置颜色:`, classValue)
             const color = getColorByClass(classValue)
             console.log(`选择的颜色:`, color)
-            entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+
+            if (entity.polygon) {
+              entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+              entity.polygon.outline = true
+              entity.polygon.outlineColor = Cesium.Color.BLACK
+            } else if (entity.polygons) {
+              entity.polygons.material = new Cesium.ColorMaterialProperty(color)
+              entity.polygons.outline = true
+              entity.polygons.outlineColor = Cesium.Color.BLACK
+              console.log(`✨ 导入MultiPolygon ${name} 颜色设置完成`)
+            }
           } else {
-            entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.5))
+            console.log(`⚠️ 导入实体 ${name} 没有有效的Class值，使用默认黄色`)
+            const defaultColor = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.7))
+
+            if (entity.polygon) {
+              entity.polygon.material = defaultColor
+              entity.polygon.outline = true
+              entity.polygon.outlineColor = Cesium.Color.BLACK
+            } else if (entity.polygons) {
+              entity.polygons.material = defaultColor
+              entity.polygons.outline = true
+              entity.polygons.outlineColor = Cesium.Color.BLACK
+            }
           }
-          
-          entity.polygon.outline = false
 
           areaList.value.push(name)
           entityMap.value[name] = entity
@@ -475,19 +447,29 @@ const uploadGeojsonHandler = async (name, geojson) => {
 }
 
 const handleFileUpload = async (fileData) => {
-  if (fileData.type === 'geojson') {
-    // 处理多文件上传
-    if (fileData.files && Array.isArray(fileData.files)) {
-      // 显示上传进度信息
-      console.log(`开始批量导入 ${fileData.files.length} 个GeoJSON文件...`);
-      
-      // 批量处理所有文件
-      for (const file of fileData.files) {
-        await handleGeoJsonUpload(file);
-      }
-      
-      console.log('批量导入完成');
+  console.log('收到上传事件:', fileData);
+
+  // 处理后端上传的情况（GeoJSON和Shapefile都通过后端处理）
+  if (fileData.result && fileData.result.name) {
+    console.log(`处理后端上传的文件: ${fileData.result.name}`);
+
+    // 重新加载索引列表
+    await reloadAreaList();
+
+    // 加载新上传的数据
+    await loadNewUpload(fileData.result.name);
+  }
+  // 处理前端直接处理的文件（保留原有逻辑）
+  else if (fileData.files && Array.isArray(fileData.files)) {
+    // 显示上传进度信息
+    console.log(`开始批量导入 ${fileData.files.length} 个GeoJSON文件...`);
+
+    // 批量处理所有文件
+    for (const file of fileData.files) {
+      await handleGeoJsonUpload(file);
     }
+
+    console.log('批量导入完成');
   } else if (fileData.type === 'geotiff') {
     handleGeoTiffUpload(fileData.file);
   }
@@ -584,17 +566,44 @@ const handleLargeGeoJsonFile = (file) => {
               
               console.log(`实体 ${name} 的Class值:`, classValue)
               
-              // 根据Class属性设置颜色
+              // 根据Class属性设置颜色 - 支持Polygon和MultiPolygon
               if (classValue !== undefined && !isNaN(classValue)) {
+                debugger;
                 console.log(`为实体 ${name} 设置颜色:`, classValue)
                 const color = getColorByClass(classValue)
                 console.log(`选择的颜色:`, color)
-                entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+
+                // 检查是多边形还是多个多边形
+                if (entity.polygon) {
+                  entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+                  entity.polygon.outline = true
+                  entity.polygon.outlineColor = Cesium.Color.BLACK
+                  entity.polygon.height = 0
+                  entity.polygon.extrudedHeight = 0
+                } else if (entity.polygons) {
+                  entity.polygons.material = new Cesium.ColorMaterialProperty(color)
+                  entity.polygons.outline = true
+                  entity.polygons.outlineColor = Cesium.Color.BLACK
+                  entity.polygons.height = 0
+                  entity.polygons.extrudedHeight = 0
+                  console.log(`✨ MultiPolygon ${name} 颜色设置完成`)
+                } else {
+                  console.warn(`⚠️ 实体 ${name} 既没有polygon也没有polygons属性`)
+                }
               } else {
-                entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.5))
+                console.log(`⚠️ 实体 ${name} 没有有效的Class值，使用默认黄色`)
+                const defaultColor = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.7))
+
+                if (entity.polygon) {
+                  entity.polygon.material = defaultColor
+                  entity.polygon.outline = true
+                  entity.polygon.outlineColor = Cesium.Color.BLACK
+                } else if (entity.polygons) {
+                  entity.polygons.material = defaultColor
+                  entity.polygons.outline = true
+                  entity.polygons.outlineColor = Cesium.Color.BLACK
+                }
               }
-              
-              entity.polygon.outline = false
               
               areaList.value.push(name)
               entityMap.value[name] = entity
@@ -770,17 +779,36 @@ const handleGeoJsonUpload = async (file) => {
           
           console.log(`导入的实体 ${name || '未命名'} 的Class值:`, classValue)
           
-          // 根据Class属性设置颜色
+          // 根据Class属性设置颜色 - 支持Polygon和MultiPolygon
           if (classValue !== undefined && !isNaN(classValue)) {
             console.log(`为导入的实体 ${name || '未命名'} 设置颜色:`, classValue)
             const color = getColorByClass(classValue)
             console.log(`选择的颜色:`, color)
-            entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+
+            if (entity.polygon) {
+              entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+              entity.polygon.outline = true
+              entity.polygon.outlineColor = Cesium.Color.BLACK
+            } else if (entity.polygons) {
+              entity.polygons.material = new Cesium.ColorMaterialProperty(color)
+              entity.polygons.outline = true
+              entity.polygons.outlineColor = Cesium.Color.BLACK
+              console.log(`✨ 导入MultiPolygon ${name} 颜色设置完成`)
+            }
           } else {
-            entity.polygon.material = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.5))
+            console.log(`⚠️ 导入实体 ${name || '未命名'} 没有有效的Class值，使用默认黄色`)
+            const defaultColor = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.7))
+
+            if (entity.polygon) {
+              entity.polygon.material = defaultColor
+              entity.polygon.outline = true
+              entity.polygon.outlineColor = Cesium.Color.BLACK
+            } else if (entity.polygons) {
+              entity.polygons.material = defaultColor
+              entity.polygons.outline = true
+              entity.polygons.outlineColor = Cesium.Color.BLACK
+            }
           }
-          
-          entity.polygon.outline = false
         }
       }
       
@@ -884,30 +912,117 @@ const handleGeoTiffUpload = async (file) => {
 }
 
 // 列表点击定位
-const flyToArea = (name) => {
-  const entity = entityMap.value[name]
-  const metadata = areaMeta.value[name]
-  
-  // 处理GeoTIFF类型
-  if (metadata && metadata.type === 'geotiff') {
-    // 如果是GeoTIFF图层，直接飞到图层位置
-    const layer = metadata.layer
-    if (layer) {
-      const rectangle = layer.imageryProvider.rectangle
-      viewerRef.value.camera.flyTo({
-        destination: rectangle
+const flyToArea = async (name) => {
+  console.log(`点击开发区: ${name}`)
+
+  // 检查是否已经加载了该开发区的数据
+  if (entityMap.value[name]) {
+    console.log(`开发区 ${name} 已加载，直接飞转`)
+    const entity = entityMap.value[name]
+    const metadata = areaMeta.value[name]
+
+    // 处理GeoTIFF类型
+    if (metadata && metadata.type === 'geotiff') {
+      const layer = metadata.layer
+      if (layer) {
+        const rectangle = layer.imageryProvider.rectangle
+        viewerRef.value.camera.flyTo({
+          destination: rectangle
+        })
+      }
+      return
+    }
+
+    // 处理GeoJSON类型
+    const hierarchy = entity?.polygon?.hierarchy?.getValue(Cesium.JulianDate.now())
+    if (hierarchy?.positions?.length) {
+      const bs = Cesium.BoundingSphere.fromPoints(hierarchy.positions)
+      viewerRef.value.camera.flyToBoundingSphere(bs, {
+        offset: new Cesium.HeadingPitchRange(0, -0.8, 10000)
       })
     }
     return
   }
-  
-  // 处理GeoJSON类型
-  const hierarchy = entity?.polygon?.hierarchy?.getValue(Cesium.JulianDate.now())
-  if (!hierarchy?.positions?.length) return
-  const bs = Cesium.BoundingSphere.fromPoints(hierarchy.positions)
-  viewerRef.value.camera.flyToBoundingSphere(bs, {
-    offset: new Cesium.HeadingPitchRange(0, -0.8, 10000)
-  })
+
+  // 如果未加载，则按需加载
+  console.log(`按需加载开发区数据: ${name}`)
+  try {
+    const areaData = await fetchGeojson(name)
+
+    if (!areaData) {
+      console.warn(`无法获取 ${name} 的数据`)
+      return
+    }
+
+    let geojsonData
+    // 兼容新旧数据结构
+    if (areaData.geojson) {
+      // 旧格式：{ name: string, geojson: FeatureCollection }
+      geojsonData = areaData.geojson
+    } else if (areaData.type === 'FeatureCollection') {
+      // 新格式：直接是FeatureCollection
+      geojsonData = areaData
+    } else {
+      console.warn(`未知的数据格式: ${name}`)
+      return
+    }
+
+    console.log(`开始加载 ${name} 的GeoJSON数据`)
+    const dataSource = await Cesium.GeoJsonDataSource.load(geojsonData, { clampToGround: false })
+    viewerRef.value.dataSources.add(dataSource)
+
+    // 处理实体
+    for (const entity of dataSource.entities.values) {
+      const props = entity.properties
+      const entityName = props?.KFQMC?.getValue?.() || name
+      const province = props?.province?.getValue?.() || areaMeta.value[name]?.province || ''
+
+      // 尝试多种可能的属性名获取Class值
+      let classValue = undefined
+      if (props?.Class && typeof props.Class.getValue === 'function') {
+        classValue = props.Class.getValue()
+      } else if (props?.class && typeof props.class.getValue === 'function') {
+        classValue = props.class.getValue()
+      } else if (props?.CLASS && typeof props.CLASS.getValue === 'function') {
+        classValue = props.CLASS.getValue()
+      }
+
+      // 确保classValue是数字
+      if (classValue !== undefined) {
+        classValue = Number(classValue)
+      }
+
+      console.log(`加载的实体 ${entityName} 的Class值:`, classValue)
+
+      // 设置颜色
+      if (classValue !== undefined && !isNaN(classValue)) {
+        const color = getColorByClass(classValue)
+        if (entity.polygon) {
+          entity.polygon.material = new Cesium.ColorMaterialProperty(color)
+          entity.polygon.outline = false
+        }
+      } else {
+        const defaultColor = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.5))
+        if (entity.polygon) {
+          entity.polygon.material = defaultColor
+          entity.polygon.outline = false
+        }
+      }
+
+      // 更新实体映射
+      entityMap.value[entityName] = entity
+      if (!areaMeta.value[entityName]) {
+        areaMeta.value[entityName] = { province }
+      }
+    }
+
+    // 飞到加载的区域
+    viewerRef.value.flyTo(dataSource)
+    console.log(`✅ 成功加载并飞转到开发区: ${name}`)
+
+  } catch (err) {
+    console.error(`❌ 加载开发区 ${name} 失败:`, err)
+  }
 }
 
 // 删除（从后端和场景中移除）
@@ -944,6 +1059,131 @@ const handleDeleteGeojson = async (name) => {
   } catch (err) {
     console.error('❌ 删除失败:', err)
     alert('删除失败，请检查后端服务')
+  }
+}
+
+// 重新加载开发区列表
+const reloadAreaList = async () => {
+  try {
+    // 先获取索引文件
+    const indexList = await fetchGeojsonIndex();
+
+    if (!Array.isArray(indexList)) {
+      console.warn('⚠️ 后端返回的索引数据不是数组格式:', indexList);
+      return;
+    }
+
+    // 获取已删除列表
+    let deletedList = [];
+    try {
+      deletedList = await fetchDeletedList();
+    } catch (e) {
+      console.warn('获取已删除列表失败:', e.message);
+    }
+
+    // 更新areaList
+    const newAreaList = [];
+    for (const item of indexList) {
+      if (!deletedList.includes(item.name)) {
+        newAreaList.push(item.name);
+      }
+    }
+
+    // 只添加新的开发区到列表中
+    const existingNames = new Set(areaList.value);
+    for (const name of newAreaList) {
+      if (!existingNames.has(name)) {
+        areaList.value.push(name);
+      }
+    }
+
+    console.log('✅ 开发区列表已更新，总数:', areaList.value.length);
+  } catch (err) {
+    console.error('❌ 重新加载开发区列表失败:', err);
+  }
+}
+
+// 加载新上传的数据
+const loadNewUpload = async (name) => {
+  try {
+    console.log(`🔄 加载新上传的数据: ${name}`);
+
+    // 获取新上传的数据
+    const areaData = await fetchGeojson(name);
+
+    if (!areaData) {
+      console.warn(`⚠️ 无法获取 ${name} 的数据`);
+      return;
+    }
+
+    let geojsonData;
+    // 兼容新旧数据结构
+    if (areaData.geojson) {
+      // 旧格式：{ name: string, geojson: FeatureCollection }
+      geojsonData = areaData.geojson;
+    } else if (areaData.type === 'FeatureCollection') {
+      // 新格式：直接是FeatureCollection
+      geojsonData = areaData;
+    } else {
+      console.warn(`⚠️ 未知的数据格式: ${name}`);
+      return;
+    }
+
+    // 加载到���图
+    const dataSource = await Cesium.GeoJsonDataSource.load(geojsonData, { clampToGround: false });
+    viewerRef.value.dataSources.add(dataSource);
+
+    // 处理实体
+    for (const entity of dataSource.entities.values) {
+      const props = entity.properties;
+      const entityName = props?.KFQMC?.getValue?.() || name;
+      const province = props?.province?.getValue?.() || '';
+
+      // 尝试多种可能的属性名获取Class值
+      let classValue = undefined;
+      if (props?.Class && typeof props.Class.getValue === 'function') {
+        classValue = props.Class.getValue();
+      } else if (props?.class && typeof props.class.getValue === 'function') {
+        classValue = props.class.getValue();
+      } else if (props?.CLASS && typeof props.CLASS.getValue === 'function') {
+        classValue = props.CLASS.getValue();
+      }
+
+      // 确保classValue是数字
+      if (classValue !== undefined) {
+        classValue = Number(classValue);
+      }
+
+      console.log(`新实体 ${entityName} 的Class值:`, classValue);
+
+      // 设置颜色
+      if (classValue !== undefined && !isNaN(classValue)) {
+        const color = getColorByClass(classValue);
+        if (entity.polygon) {
+          entity.polygon.material = new Cesium.ColorMaterialProperty(color);
+          entity.polygon.outline = true;
+          entity.polygon.outlineColor = Cesium.Color.BLACK;
+        }
+      } else {
+        const defaultColor = new Cesium.ColorMaterialProperty(Cesium.Color.YELLOW.withAlpha(0.7));
+        if (entity.polygon) {
+          entity.polygon.material = defaultColor;
+          entity.polygon.outline = true;
+          entity.polygon.outlineColor = Cesium.Color.BLACK;
+        }
+      }
+
+      // 更新实体映射
+      entityMap.value[entityName] = entity;
+      areaMeta.value[entityName] = { province };
+    }
+
+    // 飞到新上传的区域
+    viewerRef.value.flyTo(dataSource);
+    console.log(`✅ 成功加载新上传的区域: ${name}`);
+
+  } catch (err) {
+    console.error(`❌ 加载新上传数据失败 ${name}:`, err);
   }
 }
 </script>

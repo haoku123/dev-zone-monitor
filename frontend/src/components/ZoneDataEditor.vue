@@ -107,17 +107,17 @@
               <div class="form-row">
                 <div class="form-group">
                   <label>已批准征收土地面积</label>
-                  <input v-model.number="editData.landData.approvedExpropriatedLand" type="number" step="0.01" class="form-input" />
+                  <input v-model.number="editData.landData.approvedRequisitionArea" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
                   <label>已批准转用土地面积</label>
-                  <input v-model.number="editData.landData.approvedTransferLand" type="number" step="0.01" class="form-input" />
+                  <input v-model.number="editData.landData.approvedTransferArea" type="number" step="0.01" class="form-input" />
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label>到达供地条件面积</label>
-                  <input v-model.number="editData.landData.landReadyForSupply" type="number" step="0.01" class="form-input" />
+                  <label>已达到供地面积</label>
+                  <input v-model.number="editData.landData.availableSupplyArea" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
                   <label>已供应国有建设用地</label>
@@ -147,12 +147,24 @@
               <div class="form-row">
                 <div class="form-group">
                   <label>批而未供面积</label>
-                  <input v-model.number="editData.landData.approvedUnsuppliedLand" type="number" step="0.01" class="form-input" />
+                  <input v-model.number="editData.landData.approvedUnsuppliedArea" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
                   <label>闲置土地面积</label>
-                  <input v-model.number="editData.landData.idleLand" type="number" step="0.01" class="form-input" />
+                  <input v-model.number="editData.landData.idleLandArea" type="number" step="0.01" class="form-input" />
                 </div>
+              </div>
+            </div>
+
+            <!-- 人口数据 -->
+            <div v-if="activeTab === 'population'" class="form-section">
+              <h4>人口统计数据</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>常住人口</label>
+                  <input v-model.number="editData.populationData.residentPopulation" type="number" class="form-input" />
+                </div>
+                <div class="form-group"></div>
               </div>
             </div>
 
@@ -161,33 +173,30 @@
               <h4>经济指标数据 (万元)</h4>
               <div class="form-row">
                 <div class="form-group">
-                  <label>固定资产投资</label>
-                  <input v-model.number="editData.economicData.fixedAssetInvestment" type="number" step="0.01" class="form-input" />
+                  <label>固定资产总额 (万元)</label>
+                  <input v-model.number="editData.economicData.totalFixedAssets" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>工业总产值</label>
-                  <input v-model.number="editData.economicData.industrialOutput" type="number" step="0.01" class="form-input" />
+                  <label>企业税收总额 (万元)</label>
+                  <input v-model.number="editData.economicData.totalEnterpriseTax" type="number" step="0.01" class="form-input" />
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label>税收总额</label>
+                  <label>税收总额 (万元)</label>
                   <input v-model.number="editData.economicData.totalTax" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>投资强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.investmentIntensity" type="number" step="0.01" class="form-input" />
+                  <label>企业总收入 (万元)</label>
+                  <input v-model.number="editData.economicData.totalEnterpriseRevenue" type="number" step="0.01" class="form-input" />
                 </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
-                  <label>产出强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.outputIntensity" type="number" step="0.01" class="form-input" />
+                  <label>投资强度 (万元/公顷)</label>
+                  <input v-model.number="calculateInvestmentIntensity" type="text" readonly class="form-input" />
                 </div>
-                <div class="form-group">
-                  <label>税收强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.taxIntensity" type="number" step="0.01" class="form-input" />
-                </div>
+                <div class="form-group"></div>
               </div>
             </div>
 
@@ -201,347 +210,23 @@
                 </div>
                 <div class="form-group">
                   <label>工业建筑面积</label>
-                  <input v-model.number="editData.buildingData.industrialBuildingArea" type="number" step="0.01" class="form-input" />
+                  <input v-model.number="editData.buildingData.industrialStorageBuildingArea" type="number" step="0.01" class="form-input" />
                 </div>
               </div>
             </div>
 
-            <!-- 企业数据 -->
-            <div v-if="activeTab === 'enterprise'" class="form-section">
-              <h4>企业统计数据</h4>
+            <!-- 基底数据 -->
+            <div v-if="activeTab === 'base'" class="form-section">
+              <h4>建筑基底数据 (万平方米)</h4>
               <div class="form-row">
                 <div class="form-group">
-                  <label>企业总数</label>
-                  <input v-model.number="editData.enterpriseData.totalEnterprises" type="number" class="form-input" />
+                  <label>建筑基底面积</label>
+                  <input v-model.number="editData.buildingBaseData.buildingBaseArea" type="number" step="0.01" class="form-input" />
                 </div>
                 <div class="form-group">
-                  <label>高新技术企业数</label>
-                  <input v-model.number="editData.enterpriseData.highTechEnterprises" type="number" class="form-input" />
+                  <label>工矿仓储露天等面积</label>
+                  <input v-model.number="editData.buildingBaseData.industrialStorageOpenArea" type="number" step="0.01" class="form-input" />
                 </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>工业企业数</label>
-                  <input v-model.number="editData.enterpriseData.industrialEnterprises" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>规模以上工业企业数</label>
-                  <input v-model.number="editData.enterpriseData.aboveDesignatedEnterprises" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>批发零售企业数</label>
-                  <input v-model.number="editData.enterpriseData.wholesaleEnterprises" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>服务企业数</label>
-                  <input v-model.number="editData.enterpriseData.serviceEnterprises" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>物流企业数</label>
-                  <input v-model.number="editData.enterpriseData.logisticsEnterprises" type="number" class="form-input" />
-                </div>
-                <div class="form-group"></div>
-              </div>
-            </div>
-
-            <!-- 效益数据 -->
-            <div v-if="activeTab === 'benefit'" class="form-section">
-              <h4>效益指标数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>投资强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.investmentIntensity" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>产出强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.outputIntensity" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>税收强度 (万元/公顷)</label>
-                  <input v-model.number="editData.benefitData.taxIntensity" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>就业密度</label>
-                  <input v-model.number="editData.benefitData.employmentRate" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>经济密度</label>
-                  <input v-model.number="editData.benefitData.economicDensity" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>容积率</label>
-                  <input v-model.number="editData.benefitData.plotRatio" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>建筑密度</label>
-                  <input v-model.number="editData.benefitData.buildingDensity" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>绿化覆盖率</label>
-                  <input v-model.number="editData.benefitData.greenCoverageRate" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-            </div>
-
-            <!-- 基础设施数据 -->
-            <div v-if="activeTab === 'infrastructure'" class="form-section">
-              <h4>基础设施能力数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>供电能力</label>
-                  <input v-model.number="editData.infrastructureData.electricitySupply" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>供水能力</label>
-                  <input v-model.number="editData.infrastructureData.waterSupply" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>供气能力</label>
-                  <input v-model.number="editData.infrastructureData.gasSupply" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>供热能力</label>
-                  <input v-model.number="editData.infrastructureData.heatingSupply" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>污水处理能力</label>
-                  <input v-model.number="editData.infrastructureData.sewageCapacity" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>通信能力</label>
-                  <input v-model.number="editData.infrastructureData.telecommunicationCapacity" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>道路面积 (公顷)</label>
-                  <input v-model.number="editData.infrastructureData.roadArea" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group"></div>
-              </div>
-            </div>
-
-            <!-- 环保数据 -->
-            <div v-if="activeTab === 'environment'" class="form-section">
-              <h4>环保数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>污染等级</label>
-                  <select v-model="editData.environmentalData.pollutionLevel" class="form-input">
-                    <option value="">请选择</option>
-                    <option value="无">无</option>
-                    <option value="轻度">轻度</option>
-                    <option value="中度">中度</option>
-                    <option value="重度">重度</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>环境评价</label>
-                  <select v-model="editData.environmentalData.environmentalAssessment" class="form-input">
-                    <option value="">请选择</option>
-                    <option value="优秀">优秀</option>
-                    <option value="良好">良好</option>
-                    <option value="一般">一般</option>
-                    <option value="较差">较差</option>
-                  </select>
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>绿化面积 (公顷)</label>
-                  <input v-model.number="editData.environmentalData.greenArea" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>工业废水处理率 (%)</label>
-                  <input v-model.number="editData.environmentalData.industrialWasteTreatment" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>固废处理率 (%)</label>
-                  <input v-model.number="editData.environmentalData.solidWasteTreatment" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group"></div>
-              </div>
-            </div>
-
-            <!-- 管理数据 -->
-            <div v-if="activeTab === 'management'" class="form-section">
-              <h4>管理数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>管理人员数</label>
-                  <input v-model.number="editData.managementData.administrativeStaff" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>保安人员数</label>
-                  <input v-model.number="editData.managementData.securityStaff" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>维护人员数</label>
-                  <input v-model.number="editData.managementData.maintenanceStaff" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>服务人员数</label>
-                  <input v-model.number="editData.managementData.serviceStaff" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>利用率</label>
-                  <input v-model.number="editData.managementData.utilizationRate" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>闲置率</label>
-                  <input v-model.number="editData.managementData.idleRate" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-            </div>
-
-            <!-- 交通数据 -->
-            <div v-if="activeTab === 'transportation'" class="form-section">
-              <h4>交通便利性数据 (公里)</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>高速公路距离</label>
-                  <input v-model.number="editData.transportationData.highwayDistance" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>铁路距离</label>
-                  <input v-model.number="editData.transportationData.railwayDistance" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>机场距离</label>
-                  <input v-model.number="editData.transportationData.airportDistance" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>港口距离</label>
-                  <input v-model.number="editData.transportationData.portDistance" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>公共交通线路数</label>
-                  <input v-model.number="editData.transportationData.publicTransportLines" type="number" class="form-input" />
-                </div>
-                <div class="form-group"></div>
-              </div>
-            </div>
-
-            <!-- 人才数据 -->
-            <div v-if="activeTab === 'talent'" class="form-section">
-              <h4>人才与就业数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>从业人员总数</label>
-                  <input v-model.number="editData.talentData.totalEmployees" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>技术人员数</label>
-                  <input v-model.number="editData.talentData.technicalPersonnel" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>研发人员数</label>
-                  <input v-model.number="editData.talentData.researchers" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>博士人数</label>
-                  <input v-model.number="editData.talentData.doctorates" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>硕士人数</label>
-                  <input v-model.number="editData.talentData.masters" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>本科人数</label>
-                  <input v-model.number="editData.talentData.bachelors" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>平均教育水平</label>
-                  <input v-model.number="editData.talentData.averageEducationLevel" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group"></div>
-              </div>
-            </div>
-
-            <!-- 创新数据 -->
-            <div v-if="activeTab === 'innovation'" class="form-section">
-              <h4>创新数据</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>研发投入 (万元)</label>
-                  <input v-model.number="editData.innovationData.rdExpenditure" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>专利数量</label>
-                  <input v-model.number="editData.innovationData.patentCount" type="number" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>创新平台数</label>
-                  <input v-model.number="editData.innovationData.innovationPlatforms" type="number" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>技术转移项目数</label>
-                  <input v-model.number="editData.innovationData.technologyTransferProjects" type="number" class="form-input" />
-                </div>
-              </div>
-            </div>
-
-            <!-- 财务数据 -->
-            <div v-if="activeTab === 'financial'" class="form-section">
-              <h4>财务数据 (万元)</h4>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>总资产</label>
-                  <input v-model.number="editData.financialData.totalAssets" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>净资产</label>
-                  <input v-model.number="editData.financialData.netAssets" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>年收入</label>
-                  <input v-model.number="editData.financialData.annualRevenue" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group">
-                  <label>年支出</label>
-                  <input v-model.number="editData.financialData.annualExpenditure" type="number" step="0.01" class="form-input" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>资产负债率</label>
-                  <input v-model.number="editData.financialData.debtToAssetRatio" type="number" step="0.01" class="form-input" />
-                </div>
-                <div class="form-group"></div>
               </div>
             </div>
           </div>
@@ -636,44 +321,48 @@ const validationErrors = computed(() => {
   // 土地数据验证
   const landData = editData.value.landData
   if (landData) {
-    if (landData.approvedArea < 0) errors.push('批准面积不能为负数')
-    if (landData.developmentArea < 0) errors.push('开发面积不能为负数')
-    if (landData.builtArea < 0) errors.push('建成面积不能为负数')
-    if (landData.industrialArea < 0) errors.push('工业用地面积不能为负数')
-    if (landData.approvedArea > 0 && landData.developmentArea > landData.approvedArea) {
-      errors.push('开发面积不能超过批准面积')
+    if (landData.totalLandArea < 0) errors.push('土地总面积不能为负数')
+    if (landData.planningConstructionLand < 0) errors.push('规划建设用地面积不能为负数')
+    if (landData.builtUrbanConstructionLand < 0) errors.push('已建成面积不能为负数')
+    if (landData.industrialStorageLand < 0) errors.push('工矿仓储用地面积不能为负数')
+    if (landData.totalLandArea > 0 && landData.builtUrbanConstructionLand > landData.totalLandArea) {
+      errors.push('已建成面积不能超过土地总面积')
     }
-    if (landData.developmentArea > 0 && landData.builtArea > landData.developmentArea) {
-      errors.push('建成面积不能超过开发面积')
+    if (landData.builtUrbanConstructionLand > 0 && landData.industrialStorageLand > landData.builtUrbanConstructionLand) {
+      errors.push('工矿仓储用地面积不能超过已建成面积')
     }
   }
 
   // 经济数据验证
   const economicData = editData.value.economicData
   if (economicData) {
-    if (economicData.fixedAssetInvestment < 0) errors.push('固定资产投资不能为负数')
-    if (economicData.industrialOutput < 0) errors.push('工业总产值不能为负数')
+    if (economicData.totalFixedAssets < 0) errors.push('固定资产总额不能为负数')
+    if (economicData.totalEnterpriseRevenue < 0) errors.push('企业总收入不能为负数')
     if (economicData.totalTax < 0) errors.push('税收总额不能为负数')
+    if (economicData.totalEnterpriseTax < 0) errors.push('企业税收总额不能为负数')
   }
 
   // 建筑数据验证
   const buildingData = editData.value.buildingData
   if (buildingData) {
     if (buildingData.totalBuildingArea < 0) errors.push('总建筑面积不能为负数')
-    if (buildingData.industrialBuildingArea < 0) errors.push('工业建筑面积不能为负数')
-    if (buildingData.totalBuildingArea > 0 && buildingData.industrialBuildingArea > buildingData.totalBuildingArea) {
+    if (buildingData.industrialStorageBuildingArea < 0) errors.push('工业建筑面积不能为负数')
+    if (buildingData.totalBuildingArea > 0 && buildingData.industrialStorageBuildingArea > buildingData.totalBuildingArea) {
       errors.push('工业建筑面积不能超过总建筑面积')
     }
   }
 
-  // 企业数据验证
-  const enterpriseData = editData.value.enterpriseData
-  if (enterpriseData) {
-    if (enterpriseData.totalEnterprises < 0) errors.push('企业总数不能为负数')
-    if (enterpriseData.highTechEnterprises < 0) errors.push('高新技术企业数不能为负数')
-    if (enterpriseData.totalEnterprises > 0 && enterpriseData.highTechEnterprises > enterpriseData.totalEnterprises) {
-      errors.push('高新技术企业数不能超过企业总数')
-    }
+  // 建筑基底数据验证
+  const buildingBaseData = editData.value.buildingBaseData
+  if (buildingBaseData) {
+    if (buildingBaseData.buildingBaseArea < 0) errors.push('建筑基底面积不能为负数')
+    if (buildingBaseData.industrialStorageOpenArea < 0) errors.push('工矿仓储露天等面积不能为负数')
+  }
+
+  // 人口数据验证
+  const populationData = editData.value.populationData
+  if (populationData) {
+    if (populationData.residentPopulation < 0) errors.push('常住人口不能为负数')
   }
 
   return errors
@@ -683,22 +372,29 @@ const validationErrors = computed(() => {
 const getFieldDisplayName = (field) => {
   const nameMap = {
     'areaName': '开发区名称',
-    'province': '所属省份',
-    'city': '所属城市',
-    'landData.approvedArea': '批准面积',
-    'landData.developmentArea': '开发面积',
-    'landData.builtArea': '建成面积',
-    'landData.industrialArea': '工业用地面积',
-    'economicData.fixedAssetInvestment': '固定资产投资',
-    'economicData.industrialOutput': '工业总产值',
+    'zoneCode': '开发区代码',
+    'landData.totalLandArea': '土地总面积',
+    'landData.planningConstructionLand': '规划建设用地面积',
+    'landData.approvedRequisitionArea': '已批准征收土地面积',
+    'landData.approvedTransferLand': '已批准转用土地面积',
+    'landData.availableSupplyArea': '已达到供地面积',
+    'landData.suppliedStateConstructionLand': '已供应国有建设用地',
+    'landData.builtUrbanConstructionLand': '已建成面积',
+    'landData.industrialStorageLand': '工矿仓储用地面积',
+    'landData.residentialLand': '住宅用地面积',
+    'landData.nonConstructionArea': '不可建设面积',
+    'landData.approvedUnsuppliedArea': '批而未供面积',
+    'landData.idleLandArea': '闲置土地面积',
+    'populationData.residentPopulation': '常住人口',
+    'economicData.totalFixedAssets': '固定资产总额',
     'economicData.totalTax': '税收总额',
-    'benefitData.investmentIntensity': '投资强度',
-    'benefitData.outputIntensity': '产出强度',
-    'benefitData.taxIntensity': '税收强度',
+    'economicData.totalEnterpriseRevenue': '企业总收入',
+    'economicData.totalEnterpriseTax': '企业税收总额',
     'buildingData.totalBuildingArea': '总建筑面积',
-    'buildingData.industrialBuildingArea': '工业建筑面积',
-    'enterpriseData.totalEnterprises': '企业总数',
-    'enterpriseData.highTechEnterprises': '高新技术企业数'
+    'buildingData.industrialStorageBuildingArea': '工业建筑面积',
+    'buildingBaseData.buildingBaseArea': '建筑基底面积',
+    'buildingBaseData.industrialStorageOpenArea': '工矿仓储露天等面积',
+    'highTechEnterprises': '高新企业数量'
   }
   return nameMap[field] || field
 }
@@ -763,6 +459,15 @@ const closeEditor = () => {
   }
   emit('close')
 }
+
+// 计算投资强度 (只读)
+const calculateInvestmentIntensity = computed(() => {
+  if (!editData.value?.economicData?.totalFixedAssets || !editData.value?.landData?.builtUrbanConstructionLand) {
+    return 'N/A'
+  }
+  const intensity = editData.value.economicData.totalFixedAssets / editData.value.landData.builtUrbanConstructionLand
+  return intensity.toFixed(2) + ' 万元/公顷'
+})
 
 // 监听areaName变化，重新加载数据
 watch(() => props.areaName, (newName) => {

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm -r --cached backend/uploads/)",
+      "Bash(git rm --cached test-data.xlsx 开发区测试系统试用说明书.docx 指标体系.docx indicatorAssessmentSystemReadOnly.xlsx)",
+      "Bash(npm run dev)",
+      "Bash(docker run --name dev-zone-postgis -e POSTGRES_DB=dev_zone_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgis/postgis:15-3.3)",
+      "Bash(psql --version)",
+      "Bash(curl -s http://localhost:8080/api/db/status)",
+      "Bash(python -m json.tool)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

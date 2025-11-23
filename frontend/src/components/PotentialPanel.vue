@@ -56,11 +56,29 @@
             <div class="potential-cards-grid">
               <div class="potential-card">
                 <div class="potential-header">
-                  <span class="potential-title">工业用地比例</span>
-                  <span class="potential-value">{{ formatPercent(potentials.structurePotential?.currentStructure?.industrialRatio?.value) }}</span>
+                  <span class="potential-title">工业与住宅用地比值</span>
+                  <span class="potential-value">{{ formatNumber(potentials.structurePotential?.industrialToResidentialRatio?.value) }} {{ potentials.structurePotential?.industrialToResidentialRatio?.unit }}</span>
                 </div>
-                <div class="potential-status" :class="getIndustrialStatus(potentials.structurePotential?.currentStructure?.industrialRatio?.value)">
-                  {{ getIndustrialStatusText(potentials.structurePotential?.currentStructure?.industrialRatio?.value) }}
+                <div class="potential-formula">
+                  公式: {{ potentials.structurePotential?.industrialToResidentialRatio?.formula }}
+                </div>
+                <div class="potential-description">
+                  {{ potentials.structurePotential?.industrialToResidentialRatio?.description }}
+                </div>
+                <div class="potential-status" :class="getIndustrialStatus(potentials.structurePotential?.industrialToResidentialRatio?.value)">
+                  {{ getIndustrialStatusText(potentials.structurePotential?.industrialToResidentialRatio?.value) }}
+                </div>
+              </div>
+              <div class="potential-card">
+                <div class="potential-header">
+                  <span class="potential-title">工业用地占建成区比例</span>
+                  <span class="potential-value">{{ formatPercent(potentials.structurePotential?.industrialToBuiltRatio?.value) }}</span>
+                </div>
+                <div class="potential-formula">
+                  公式: {{ potentials.structurePotential?.industrialToBuiltRatio?.formula }}
+                </div>
+                <div class="potential-description">
+                  {{ potentials.structurePotential?.industrialToBuiltRatio?.description }}
                 </div>
               </div>
             </div>
@@ -75,36 +93,72 @@
             <div class="potential-cards-grid">
               <div class="potential-card">
                 <div class="potential-header">
-                  <span class="potential-title">当前开发强度(容积率)</span>
-                  <span class="potential-value">{{ formatNumber(potentials.intensityPotential?.currentIntensity?.plotRatio?.value) }}</span>
+                  <span class="potential-title">工业建筑开发强度</span>
+                  <span class="potential-value">{{ formatNumber(potentials.intensityPotential?.industrialBuildingIntensity?.value) }} {{ potentials.intensityPotential?.industrialBuildingIntensity?.unit }}</span>
                 </div>
-                <div class="potential-status" :class="getIntensityStatus(potentials.intensityPotential?.currentIntensity?.plotRatio?.value)">
-                  {{ getIntensityStatusText(potentials.intensityPotential?.currentIntensity?.plotRatio?.value) }}
+                <div class="potential-formula">
+                  公式: {{ potentials.intensityPotential?.industrialBuildingIntensity?.formula }}
+                </div>
+                <div class="potential-description">
+                  {{ potentials.intensityPotential?.industrialBuildingIntensity?.description }}
+                </div>
+                <div class="potential-status" :class="getIntensityStatus(potentials.intensityPotential?.industrialBuildingIntensity?.value)">
+                  {{ getIntensityStatusText(potentials.intensityPotential?.industrialBuildingIntensity?.value) }}
                 </div>
                 <div class="potential-suggestion">
-                  {{ getIntensitySuggestion(potentials.intensityPotential?.currentIntensity?.plotRatio?.value) }}
+                  {{ getIntensitySuggestion(potentials.intensityPotential?.industrialBuildingIntensity?.value) }}
+                </div>
+              </div>
+              <div class="potential-card">
+                <div class="potential-header">
+                  <span class="potential-title">土地利用缺口</span>
+                  <span class="potential-value">{{ formatPercent(potentials.intensityPotential?.landUtilizationGap?.value) }}</span>
+                </div>
+                <div class="potential-formula">
+                  公式: {{ potentials.intensityPotential?.landUtilizationGap?.formula }}
+                </div>
+                <div class="potential-description">
+                  {{ potentials.intensityPotential?.landUtilizationGap?.description }}
+                </div>
+                <div class="potential-status" :class="getLandUtilizationStatus(potentials.intensityPotential?.landUtilizationGap?.value)">
+                  {{ getLandUtilizationStatusText(potentials.intensityPotential?.landUtilizationGap?.value) }}
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 经济潜力 -->
+          <!-- 管理潜力 -->
           <div class="potential-section">
             <h4>
-              <span class="section-icon">💼</span>
-              经济潜力
+              <span class="section-icon">🔧</span>
+              管理潜力
             </h4>
             <div class="potential-cards-grid">
               <div class="potential-card">
                 <div class="potential-header">
-                  <span class="potential-title">企业密度</span>
-                  <span class="potential-value">{{ formatNumber(potentials.economicPotential?.enterpriseDensity?.value) }} {{ potentials.economicPotential?.enterpriseDensity?.unit }}</span>
+                  <span class="potential-title">闲置土地面积</span>
+                  <span class="potential-value">{{ formatNumber(potentials.managementPotential?.idleLandArea?.value) }} {{ potentials.managementPotential?.idleLandArea?.unit }}</span>
                 </div>
-                <div class="potential-status" :class="getEnterpriseStatus(potentials.economicPotential?.enterpriseDensity?.value)">
-                  {{ getEnterpriseStatusText(potentials.economicPotential?.enterpriseDensity?.value) }}
+                <div class="potential-formula">
+                  公式: {{ potentials.managementPotential?.idleLandArea?.formula }}
                 </div>
-                <div class="potential-suggestion">
-                  {{ getEnterpriseSuggestion(potentials.economicPotential?.enterpriseDensity?.value) }}
+                <div class="potential-description">
+                  {{ potentials.managementPotential?.idleLandArea?.description }}
+                </div>
+              </div>
+              <div class="potential-card">
+                <div class="potential-header">
+                  <span class="potential-title">闲置土地比例</span>
+                  <span class="potential-value">{{ formatPercent(potentials.managementPotential?.idleLandRatio?.value) }}</span>
+                </div>
+                <div class="potential-formula">
+                  公式: {{ potentials.managementPotential?.idleLandRatio?.formula }}
+                </div>
+                <div class="potential-description">
+                  {{ potentials.managementPotential?.idleLandRatio?.description }}
+                </div>
+                <div class="potential-status" :class="getIdleLandStatus(potentials.managementPotential?.idleLandRatio?.value)">
+                  {{ getIdleLandStatusText(potentials.managementPotential?.idleLandRatio?.value) }}
                 </div>
               </div>
             </div>
@@ -188,9 +242,9 @@ const getExpansionPercentage = () => {
   if (!potentials.value || !zoneData.value) return 0
 
   const expansion = potentials.value.expansionPotential?.value || 0
-  const approved = zoneData.value.landData?.approvedArea || 1
+  const planning = zoneData.value.landData?.planningConstructionLand || 1
 
-  return Math.round((expansion / approved) * 100)
+  return Math.round((expansion / planning) * 100)
 }
 
 const getIndustrialStatus = (ratio) => {
@@ -258,27 +312,73 @@ const getEnterpriseSuggestion = (density) => {
   return '企业密度适中，保持现有发展态势'
 }
 
+const getLandUtilizationStatus = (gap) => {
+  if (!gap) return 'unknown'
+  if (gap < 0.05) return 'low'
+  if (gap < 0.15) return 'medium'
+  return 'high'
+}
+
+const getLandUtilizationStatusText = (gap) => {
+  const status = getLandUtilizationStatus(gap)
+  switch (status) {
+    case 'low': return '土地利用充分'
+    case 'medium': return '利用基本充分'
+    case 'high': return '存在利用缺口'
+    default: return '未知'
+  }
+}
+
+const getIdleLandStatus = (ratio) => {
+  if (!ratio) return 'unknown'
+  if (ratio < 0.05) return 'low'
+  if (ratio < 0.1) return 'medium'
+  return 'high'
+}
+
+const getIdleLandStatusText = (ratio) => {
+  const status = getIdleLandStatus(ratio)
+  switch (status) {
+    case 'low': return '闲置率较低'
+    case 'medium': return '闲置率适中'
+    case 'high': return '闲置率较高'
+    default: return '未知'
+  }
+}
+
 const getPotentialLevel = () => {
   if (!potentials.value) return { text: 'N/A', class: 'unknown', description: '无法评估' }
 
   const expansion = potentials.value.expansionPotential?.value || 0
-  const intensity = potentials.value.intensityPotential?.currentIntensity?.plotRatio?.value || 0
-  const enterprise = potentials.value.economicPotential?.enterpriseDensity?.value || 0
+  const industrialIntensity = potentials.value.intensityPotential?.industrialBuildingIntensity?.value || 0
+  const landGap = potentials.value.intensityPotential?.landUtilizationGap?.value || 0
+  const idleLandRatio = potentials.value.managementPotential?.idleLandRatio?.value || 0
 
   let score = 0
-  if (expansion > 100) score += 30
-  else if (expansion > 50) score += 20
+  // 扩展潜力评分
+  if (expansion > 200) score += 25
+  else if (expansion > 100) score += 20
+  else if (expansion > 50) score += 15
   else if (expansion > 0) score += 10
 
-  if (intensity < 1.0) score += 25
-  else if (intensity < 1.5) score += 15
+  // 强度潜力评分 (工业建筑强度)
+  if (industrialIntensity > 1.0) score += 20
+  else if (industrialIntensity > 0.7) score += 15
+  else if (industrialIntensity > 0.5) score += 10
 
-  if (enterprise > 10) score += 25
-  else if (enterprise > 5) score += 15
+  // 土地利用缺口评分 (负向指标，缺口越小越好)
+  if (landGap < 0.05) score += 20
+  else if (landGap < 0.1) score += 15
+  else if (landGap < 0.15) score += 10
 
-  if (score >= 70) return { text: 'A级', class: 'level-a', description: '发展潜力巨大，具备快速发展的基础条件' }
-  if (score >= 50) return { text: 'B级', class: 'level-b', description: '发展潜力良好，通过优化可进一步提升' }
-  if (score >= 30) return { text: 'C级', class: 'level-c', description: '发展潜力一般，需要重点关注瓶颈制约' }
+  // 闲置土地评分 (负向指标，闲置率越低越好)
+  if (idleLandRatio < 0.02) score += 20
+  else if (idleLandRatio < 0.05) score += 15
+  else if (idleLandRatio < 0.1) score += 10
+
+  if (score >= 75) return { text: 'A级', class: 'level-a', description: '发展潜力巨大，具备快速发展的基础条件' }
+  if (score >= 60) return { text: 'B级', class: 'level-b', description: '发展潜力良好，通过优化可进一步提升' }
+  if (score >= 40) return { text: 'C级', class: 'level-c', description: '发展潜力一般，需要重点关注瓶颈制约' }
   return { text: 'D级', class: 'level-d', description: '发展潜力有限，需要从根本上改善发展环境' }
 }
 
@@ -288,25 +388,32 @@ const getRecommendations = () => {
   if (!potentials.value || !zoneData.value) return ['数据不足，无法提供具体建议']
 
   const expansion = potentials.value.expansionPotential?.value || 0
-  const intensity = potentials.value.intensityPotential?.currentIntensity?.plotRatio?.value || 0
-  const enterprise = potentials.value.economicPotential?.enterpriseDensity?.value || 0
+  const industrialIntensity = potentials.value.intensityPotential?.industrialBuildingIntensity?.value || 0
+  const landGap = potentials.value.intensityPotential?.landUtilizationGap?.value || 0
+  const idleLandRatio = potentials.value.managementPotential?.idleLandRatio?.value || 0
 
-  if (expansion > 50) {
-    recommendations.push('充分利用土地资源，加快基础设施配套建设')
+  if (expansion > 100) {
+    recommendations.push('可扩展土地资源丰富，建议加快基础设施配套建设')
+  } else if (expansion > 50) {
+    recommendations.push('有一定的扩展空间，应合理规划土地利用')
   }
 
-  if (intensity < 0.8) {
-    recommendations.push('提高土地利用效率，优化空间布局')
-  } else if (intensity > 1.5) {
-    recommendations.push('注重空间品质提升，完善公共服务配套')
+  if (industrialIntensity < 0.5) {
+    recommendations.push('工业建筑开发强度偏低，建议提高土地利用效率')
+  } else if (industrialIntensity > 1.2) {
+    recommendations.push('工业开发强度较高，应注重空间品质和配套设施')
   }
 
-  if (enterprise < 5) {
-    recommendations.push('加大招商引资力度，完善产业政策体系')
+  if (landGap > 0.15) {
+    recommendations.push('土地利用缺口较大，需要加快已供应土地的开发建设')
+  }
+
+  if (idleLandRatio > 0.1) {
+    recommendations.push('闲置土地比例较高，需要加强土地管理和盘活利用')
   }
 
   if (recommendations.length === 0) {
-    recommendations.push('保持现有发展态势，持续优化产业结构')
+    recommendations.push('土地利用状况良好，建议继续保持现有发展水平')
   }
 
   return recommendations

@@ -13,7 +13,7 @@
         <div class="dropdown">
           <button class="dropdown-btn">数据表格</button>
           <div class="dropdown-content">
-            <a href="#">表格1</a>
+            <a href="#" @click.prevent="$emit('showAttributeTable')">属性数据表</a>
             <a href="#">表格2</a>
           </div>
         </div>

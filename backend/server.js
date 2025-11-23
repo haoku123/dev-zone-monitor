@@ -4,6 +4,13 @@ const path = require('path');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const cors = require('cors');
+const shapefile = require('shapefile');
+
+// 数据库相关引用
+const { connection, testConnection } = require('./db/connection');
+const dbManager = require('./db/database');
+const DataMigrator = require('./tools/migrate-to-db');
+
 const app = express();
 
 app.use(cors());
@@ -13,6 +20,24 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const upload = multer({ dest: 'uploads/' });
 
+// 多文件上传存储配置（用于Shapefile）
+const multiUpload = multer({
+  storage: multer.memoryStorage(), // 使用内存存储，文件将被保存在buffer中
+  fileFilter: (req, file, cb) => {
+    const allowedExtensions = ['.shp', '.shx', '.dbf', '.geojson'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`不支持的文件格式: ${ext}`), false);
+    }
+  },
+  limits: {
+    files: 10, // 最多10个文件
+    fileSize: 50 * 1024 * 1024 // 每个文件最大50MB
+  }
+});
+
 // 存储路径
 const DATA_PATH = './uploads/geojsons.json';
 const DELETED_PATH = './uploads/deleted.json';
@@ -20,13 +45,27 @@ const DELETED_PATH = './uploads/deleted.json';
 // POST 保存
 app.post('/api/geojson', (req, res) => {
   const { name, geojson } = req.body;
-  
-  if (!name || !geojson) {
-    return res.status(400).json({ error: '缺少必要参数' });
+
+  // 输入验证
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    return res.status(400).json({ error: '无效的名称参数' });
   }
-  
-  // 使用分文件存储方式，每个开发区保存为单独的文件
-  const safeFileName = name.replace(/[^\w\u4e00-\u9fa5]/g, '_');
+
+  if (!geojson) {
+    return res.status(400).json({ error: '缺少geojson数据' });
+  }
+
+  // 验证geojson格式
+  if (typeof geojson !== 'object' || !geojson.type) {
+    return res.status(400).json({ error: '无效的geojson格式' });
+  }
+
+  // 安全的文件名处理，防止路径遍历
+  const safeFileName = name.replace(/[^\w\u4e00-\u9fa5\-_]/g, '_').replace(/\.\./g, '').trim();
+  if (safeFileName.length === 0) {
+    return res.status(400).json({ error: '文件名无效' });
+  }
+
   const individualFilePath = path.join(__dirname, 'uploads', 'areas', `${safeFileName}.json`);
   
   // 确保目录存在
@@ -159,25 +198,36 @@ app.get('/api/geojson_index', (req, res) => {
 // GET 获取单个开发区数据
 app.get('/api/geojson/:name', (req, res) => {
   const name = decodeURIComponent(req.params.name);
-  const safeFileName = name.replace(/[^\w\u4e00-\u9fa5]/g, '_');
-  const filePath = path.join(__dirname, 'uploads', 'areas', `${safeFileName}.json`);
-  
+
+  // 首先尝试直接使用名称查找文件
+  let filePath = path.join(__dirname, 'uploads', 'areas', `${name}.json`);
+
+  // 如果文件不存在，尝试使用safeFileName
+  if (!fs.existsSync(filePath)) {
+    const safeFileName = name.replace(/[^\w\u4e00-\u9fa5]/g, '_');
+    filePath = path.join(__dirname, 'uploads', 'areas', `${safeFileName}.json`);
+  }
+
+  console.log(`查找文件: ${filePath}`);
+
   fs.readFile(filePath, 'utf-8', (err, data) => {
     if (err || !data) {
       console.error(`读取开发区 ${name} 数据失败:`, err);
+      console.error(`尝试的文件路径: ${filePath}`);
       return res.status(404).json({ error: '未找到该开发区数据' });
     }
-    
+
     try {
       // 移除BOM标记（如果存在）
       if (data.charCodeAt(0) === 0xFEFF) {
         data = data.substring(1);
       }
-      
+
       // 清理可能导致JSON解析错误的字符
       data = data.replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, '');
-      
+
       const areaData = JSON.parse(data);
+
       res.json(areaData);
     } catch (parseError) {
       console.error(`解析开发区 ${name} 数据失败:`, parseError);
@@ -347,6 +397,136 @@ app.post('/api/import-excel', uploadExcel.single('excel'), (req, res) => {
   }
 });
 
+// Shapefile和GeoJSON上传API
+app.post('/api/upload-shapefile', multiUpload.array('files'), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: '未上传文件' });
+    }
+
+    const outputName = req.body.name || `shapefile_${Date.now()}`;
+
+    // 检查上传的是单个GeoJSON文件还是Shapefile文件集
+    const geojsonFile = req.files.find(file =>
+      file && file.originalname && file.originalname.toLowerCase().endsWith('.geojson')
+    );
+    const shpFiles = req.files.filter(file =>
+      file && file.originalname && ['.shp', '.shx', '.dbf'].some(ext =>
+        file.originalname.toLowerCase().endsWith(ext)
+      )
+    );
+
+    let result;
+
+    if (geojsonFile) {
+      // 处理GeoJSON文件
+      result = await processGeoJSONFile(geojsonFile, outputName);
+    } else if (shpFiles.length > 0) {
+      // 处理Shapefile文件集
+      result = await processUploadedShapefiles(req.files, outputName);
+    } else {
+      return res.status(400).json({ error: '未找到支持的文件格式（.geojson 或 .shp/.shx/.dbf）' });
+    }
+
+    // 内存存储，无需清理临时文件
+
+    res.json({
+      success: true,
+      message: `成功上传并处理文件: ${outputName}`,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('Shapefile上传处理错误:', error);
+
+    // 内存存储，无需清理临时文件
+
+    res.status(500).json({ error: '文件处理失败: ' + error.message });
+  }
+});
+
+// 处理GeoJSON文件
+async function processGeoJSONFile(geojsonFile, outputName) {
+  try {
+    // 读取GeoJSON文件内容
+    const geojsonContent = fs.readFileSync(geojsonFile.path, 'utf-8');
+
+    // 解析并验证GeoJSON
+    let geoJSON;
+    try {
+      geoJSON = JSON.parse(geojsonContent);
+    } catch (parseError) {
+      throw new Error('GeoJSON文件格式无效: ' + parseError.message);
+    }
+
+    // 验证GeoJSON结构
+    if (!geoJSON.type || !geoJSON.features) {
+      throw new Error('无效的GeoJSON格式：缺少type或features字段');
+    }
+
+    // 确保输出目录存在
+    const outputDir = path.join(__dirname, 'uploads', 'areas');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // 保存GeoJSON文件
+    const outputPath = path.join(outputDir, `${outputName}.json`);
+    fs.writeFileSync(outputPath, JSON.stringify(geoJSON, null, 2), 'utf-8');
+
+    // 更新索引
+    const indexPath = path.join(__dirname, 'uploads', 'geojson_index.json');
+    let index = [];
+
+    if (fs.existsSync(indexPath)) {
+      try {
+        const indexContent = fs.readFileSync(indexPath, 'utf-8');
+        index = JSON.parse(indexContent);
+      } catch (indexError) {
+        console.warn('读取现有索引失败，将创建新索引:', indexError.message);
+      }
+    }
+
+    // 添加新文件到索引
+    index.push({
+      name: outputName,
+      filePath: `areas/${outputName}.json`,
+      uploadTime: new Date().toISOString(),
+      source: 'geojson_upload',
+      featureCount: geoJSON.features.length
+    });
+
+    // 保存更新后的索引
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+
+    return {
+      fileName: `${outputName}.json`,
+      filePath: `areas/${outputName}.json`,
+      featureCount: geoJSON.features.length,
+      source: 'geojson_upload',
+      properties: extractGeoJSONProperties(geoJSON)
+    };
+
+  } catch (error) {
+    throw new Error(`处理GeoJSON文件失败: ${error.message}`);
+  }
+}
+
+// 提取GeoJSON属性信息
+function extractGeoJSONProperties(geoJSON) {
+  if (!geoJSON.features || geoJSON.features.length === 0) {
+    return [];
+  }
+
+  // 从第一个要素获取所有属性键
+  const firstFeature = geoJSON.features[0];
+  if (!firstFeature.properties) {
+    return [];
+  }
+
+  return Object.keys(firstFeature.properties);
+}
+
 // 处理Excel数据
 function processExcelData(excelData) {
   const results = [];
@@ -398,14 +578,14 @@ function convertExcelToStandardFormat(excelRow) {
       planningConstructionLand: parseFloat(excelRow['规划建设用地面积'] || 0),
       approvedExpropriatedLand: parseFloat(excelRow['已批准征收土地面积'] || 0),
       approvedTransferLand: parseFloat(excelRow['已批准转用土地面积'] || 0),
-      landReadyForSupply: parseFloat(excelRow['已达到供地面积'] || excelRow['到达供地条件面积'] || 0),
+      availableSupplyArea: parseFloat(excelRow['已达到供���面积'] || excelRow['到达供地条件面积'] || 0),
       suppliedStateConstructionLand: parseFloat(excelRow['已供应国有建设用地'] || 0),
       builtUrbanConstructionLand: parseFloat(excelRow['已建成面积'] || excelRow['已建成城镇建设用地'] || 0),
       industrialStorageLand: parseFloat(excelRow['工矿仓储用地面积'] || 0),
       residentialLand: parseFloat(excelRow['住宅用地面积'] || 0),
       nonConstructionArea: parseFloat(excelRow['不可建设面积'] || 0),
-      approvedUnsuppliedLand: parseFloat(excelRow['批而未供面积'] || 0),
-      idleLand: parseFloat(excelRow['闲置土地面积'] || 0)
+      approvedUnsuppliedArea: parseFloat(excelRow['批而未供面积'] || 0),
+      idleLandArea: parseFloat(excelRow['闲置土地面积'] || 0)
     },
 
     // 人口数据
@@ -574,10 +754,254 @@ async function loadZoneData(areaName) {
   });
 }
 
+// 安全除法��数
+const safeDivide = (numerator, denominator, defaultValue = 0) => {
+  if (numerator === null || numerator === undefined || isNaN(numerator)) {
+    numerator = 0;
+  }
+  if (denominator === null || denominator === undefined || isNaN(denominator) || denominator === 0) {
+    return defaultValue;
+  }
+  return numerator / denominator;
+};
+
+// 安全获取嵌套对象值
+const safeGet = (obj, path, defaultValue = 0) => {
+  try {
+    return path.split('.').reduce((current, key) => current && current[key], obj) || defaultValue;
+  } catch (e) {
+    return defaultValue;
+  }
+};
+
+// Shapefile转GeoJSON函数
+async function convertShapefileToGeoJSON(shpPath, dbfPath, options = {}) {
+  const { encoding = 'utf8' } = options;
+
+  try {
+    const features = [];
+    const source = await shapefile.open(shpPath, dbfPath, encoding);
+
+    console.log(`开始处理Shapefile: ${shpPath}`);
+
+    let result = await source.read();
+    while (!result.done) {
+      const feature = result.value;
+
+      // 添加基本属性
+      if (feature.properties) {
+        feature.properties.source = 'shapefile';
+        feature.properties.converted_at = new Date().toISOString();
+      }
+
+      features.push(feature);
+      result = await source.read();
+    }
+
+    await source.close();
+
+    const geojson = {
+      type: 'FeatureCollection',
+      features: features
+    };
+
+    console.log(`Shapefile转换成功: ${features.length} 个要素`);
+    return geojson;
+
+  } catch (error) {
+    console.error('Shapefile转换失败:', error);
+    throw new Error(`Shapefile转换失败: ${error.message}`);
+  }
+}
+
+// 从Buffer转换Shapefile为GeoJSON（用于内存中的文件）
+async function convertShapefileFromBuffer(shpBuffer, dbfBuffer, outputName, options = {}) {
+  const { encoding = 'utf8' } = options;
+
+  try {
+    const features = [];
+
+    console.log(`开始处理内存中的Shapefile: ${outputName}`);
+
+    // 使用shapefile库从buffer读取
+    let result;
+    try {
+      result = await shapefile.read(
+        shpBuffer,
+        dbfBuffer,
+        { encoding }
+      );
+    } catch (readError) {
+      console.error('读取Shapefile buffer失败:', readError);
+      throw new Error(`读取Shapefile失败: ${readError.message}`);
+    }
+
+    // 处理所有要素
+    if (result && result.type === 'FeatureCollection') {
+      result.features.forEach(feature => {
+        // 添加基本属性
+        if (feature.properties) {
+          feature.properties.source = 'shapefile_upload';
+          feature.properties.converted_at = new Date().toISOString();
+          feature.properties.output_name = outputName;
+        }
+
+        features.push(feature);
+      });
+    } else if (result) {
+      // 如果是单个feature
+      if (result.properties) {
+        result.properties.source = 'shapefile_upload';
+        result.properties.converted_at = new Date().toISOString();
+        result.properties.output_name = outputName;
+      }
+      features.push(result);
+    }
+
+    const geojson = {
+      type: 'FeatureCollection',
+      features: features
+    };
+
+    console.log(`内存Shapefile转换成功: ${features.length} 个要素`);
+    return geojson;
+
+  } catch (error) {
+    console.error('内存Shapefile转换失败:', error);
+    throw new Error(`内存Shapefile转换失败: ${error.message}`);
+  }
+}
+
+// 检测文件编码
+function detectEncoding(buffer) {
+  // 简单的编码检测，实际应用中可能需要更复杂的检测
+  const text = buffer.toString('binary');
+
+  // 检测是否包含中文字符
+  if (/[\u4e00-\u9fa5]/.test(text)) {
+    // 尝试UTF-8解码
+    try {
+      Buffer.from(text, 'binary').toString('utf8');
+      return 'utf8';
+    } catch (e) {
+      // UTF-8失败，尝试GBK
+      try {
+        Buffer.from(text, 'binary').toString('gbk');
+        return 'gbk';
+      } catch (e2) {
+        return 'utf8'; // 默认使用UTF-8
+      }
+    }
+  }
+
+  return 'utf8';
+}
+
+// 处理上传的Shapefile文件
+async function processUploadedShapefiles(files, outputName) {
+  const shpFile = files.find(f => f && f.originalname && f.originalname.endsWith('.shp'));
+  const dbfFile = files.find(f => f && f.originalname && f.originalname.endsWith('.dbf'));
+
+  if (!shpFile) {
+    throw new Error('缺少.shp文件');
+  }
+
+  if (!dbfFile) {
+    throw new Error('缺少.dbf文件');
+  }
+
+  // 检测编码
+  const encoding = detectEncoding(dbfFile.buffer);
+  console.log(`检测到编码: ${encoding}`);
+
+  // 转换为GeoJSON - 使用内存中的buffer
+  const geojson = await convertShapefileFromBuffer(
+    shpFile.buffer,
+    dbfFile.buffer,
+    outputName,
+    { encoding }
+  );
+
+  // 添加基本属性
+  if (geojson.features.length > 0) {
+    const firstFeature = geojson.features[0];
+    const properties = firstFeature.properties || {};
+
+    // 使用第一个要素的属性作为基本属性
+    const baseProperties = {
+      name: outputName,
+      source: 'shapefile_upload',
+      uploaded_at: new Date().toISOString(),
+      encoding: encoding,
+      feature_count: geojson.features.length,
+      ...properties
+    };
+
+    // 为每个要素添加基本属性
+    geojson.features.forEach(feature => {
+      feature.properties = {
+        ...baseProperties,
+        ...feature.properties,
+        name: outputName
+      };
+    });
+  }
+
+  // 确保输出目录存在
+  const outputDir = path.join(__dirname, 'uploads', 'areas');
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // 保存GeoJSON文件
+  const outputPath = path.join(outputDir, `${outputName}.json`);
+  fs.writeFileSync(outputPath, JSON.stringify(geojson, null, 2), 'utf-8');
+
+  // 更新索引
+  const indexPath = path.join(__dirname, 'uploads', 'geojson_index.json');
+  let index = [];
+
+  if (fs.existsSync(indexPath)) {
+    try {
+      const indexContent = fs.readFileSync(indexPath, 'utf-8');
+      index = JSON.parse(indexContent);
+    } catch (indexError) {
+      console.warn('读取现有索引失败，将创建新索引:', indexError.message);
+    }
+  }
+
+  // 添加新文件到索引
+  index.push({
+    name: outputName,
+    filePath: `areas/${outputName}.json`,
+    uploadTime: new Date().toISOString(),
+    source: 'shapefile_upload',
+    featureCount: geojson.features.length,
+    encoding: encoding
+  });
+
+  // 保存更新后的索引
+  fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+
+  console.log(`✅ Shapefile转换成功: ${outputName}.json, ${geojson.features.length} 个要素`);
+
+  return {
+    fileName: `${outputName}.json`,
+    filePath: `areas/${outputName}.json`,
+    featureCount: geojson.features.length,
+    source: 'shapefile_upload',
+    name: outputName,
+    properties: extractGeoJSONProperties(geojson)
+  };
+}
+
 // 计算开发区评价指标 - 按照标准指标体系重构
 async function calculateZoneIndicators(areaName) {
   const zoneData = await loadZoneData(areaName);
-  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises, enterpriseData } = zoneData;
+  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises } = zoneData;
+
+  // 从zoneData中提取企业数据，如果没有则为空对象
+  const enterpriseData = zoneData.enterpriseData || {};
 
   // 计算各项指标 - 标准指标体系权重分配
   const indicators = {
@@ -591,7 +1015,7 @@ async function calculateZoneIndicators(areaName) {
       landDevelopmentLevel: {
         weight: 0.2,
         landDevelopmentRate: {
-          value: landData.totalLandArea > 0 ? landData.landReadyForSupply / landData.totalLandArea : 0,
+          value: safeDivide(safeGet(landData, 'availableSupplyArea'), safeGet(landData, 'totalLandArea')),
           formula: "已达到供地面积/土地总面积",
           unit: "ratio"
         }
@@ -601,7 +1025,7 @@ async function calculateZoneIndicators(areaName) {
       landStructureStatus: {
         weight: 0.25,
         industrialLandRate: {
-          value: landData.builtUrbanConstructionLand > 0 ? landData.industrialStorageLand / landData.builtUrbanConstructionLand : 0,
+          value: safeDivide(safeGet(landData, 'industrialStorageLand'), safeGet(landData, 'builtUrbanConstructionLand')),
           formula: "工矿仓储用地面积/已建成面积",
           unit: "ratio"
         }
@@ -611,17 +1035,17 @@ async function calculateZoneIndicators(areaName) {
       landUseIntensity: {
         weight: 0.55,
         comprehensivePlotRatio: {
-          value: landData.builtUrbanConstructionLand > 0 ? buildingData.totalBuildingArea / landData.builtUrbanConstructionLand : 0,
+          value: safeDivide(safeGet(buildingData, 'totalBuildingArea'), safeGet(landData, 'builtUrbanConstructionLand')),
           formula: "总建筑面积/已建成面积",
           unit: "ratio"
         },
         industrialPlotRatio: {
-          value: landData.industrialStorageLand > 0 ? buildingData.industrialStorageBuildingArea / landData.industrialStorageLand : 0,
+          value: safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea'), safeGet(landData, 'industrialStorageLand')),
           formula: "工矿仓储建筑面积/工矿仓储用地面积",
           unit: "ratio"
         },
         perCapitaConstructionLand: {
-          value: populationData.residentPopulation > 0 ? landData.builtUrbanConstructionLand / populationData.residentPopulation : 0,
+          value: safeDivide(safeGet(landData, 'builtUrbanConstructionLand'), safeGet(populationData, 'residentPopulation')),
           formula: "已建成面积/常住人口",
           unit: "ha/people"
         }
@@ -635,13 +1059,13 @@ async function calculateZoneIndicators(areaName) {
       outputBenefit: {
         weight: 1.0,
         fixedAssetInvestmentIntensity: {
-          value: landData.builtUrbanConstructionLand > 0 ? economicData.totalFixedAssets / landData.builtUrbanConstructionLand : 0,
-          formula: "固定资产总额/已建成面积",
+          value: safeDivide(safeGet(economicData, 'totalFixedAssets') / 10000, safeGet(landData, 'builtUrbanConstructionLand')),
+          formula: "固定资产总额(万元) ÷ 10000 ÷ 已建成面积",
           unit: "billion/ha"
         },
         commercialEnterpriseDensity: {
-          value: landData.builtUrbanConstructionLand > 0 ? (enterpriseData?.totalEnterprises || 0) / landData.builtUrbanConstructionLand : 0,
-          formula: "工商企业数量/已建成面积",
+          value: safeDivide(highTechEnterprises || 0, safeGet(landData, 'builtUrbanConstructionLand')),
+          formula: "高新技术企业数/已建成面积",
           unit: "enterprises/ha"
         }
       }
@@ -654,7 +1078,7 @@ async function calculateZoneIndicators(areaName) {
       landUseSupervisionPerformance: {
         weight: 1.0,
         landIdleRate: {
-          value: landData.builtUrbanConstructionLand > 0 ? landData.idleLand / landData.builtUrbanConstructionLand : 0,
+          value: safeDivide(safeGet(landData, 'idleLandArea'), safeGet(landData, 'builtUrbanConstructionLand')),
           formula: "闲置土地面积/已建成面积",
           unit: "ratio"
         }
@@ -668,13 +1092,13 @@ async function calculateZoneIndicators(areaName) {
       socialBenefitIndicators: {
         weight: 1.0,
         taxPerLand: {
-          value: landData.builtUrbanConstructionLand > 0 ? economicData.totalTax / landData.builtUrbanConstructionLand : 0,
-          formula: "税收总额/已建成面积",
+          value: safeDivide(safeGet(economicData, 'totalTax') / 10000, safeGet(landData, 'builtUrbanConstructionLand')),
+          formula: "税收总额(万元) ÷ 10000 ÷ 已建成面积",
           unit: "billion/ha"
         },
         industrialTaxPerLand: {
-          value: landData.builtUrbanConstructionLand > 0 ? (economicData.industrialEnterpriseTax || 0) / landData.builtUrbanConstructionLand : 0,
-          formula: "工业企业税收总额/已建成面积",
+          value: safeDivide(safeGet(economicData, 'totalEnterpriseTax') / 10000, safeGet(landData, 'builtUrbanConstructionLand')),
+          formula: "企业税收总额(万元) ÷ 10000 ÷ 已建成面积",
           unit: "billion/ha"
         }
       }
@@ -689,7 +1113,7 @@ async function calculateZoneIndicators(areaName) {
 // 计算开发区潜力分析 - 按照标准指标体系重构
 async function calculateZonePotentials(areaName) {
   const zoneData = await loadZoneData(areaName);
-  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises, enterpriseData } = zoneData;
+  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises } = zoneData;
 
   // 按照标准指标体系计算潜力分析
   const potentials = {
@@ -707,7 +1131,7 @@ async function calculateZonePotentials(areaName) {
     structurePotential: {
       // 工矿仓储用地面积 / 住宅用地面积
       industrialToResidentialRatio: {
-        value: landData.residentialLand > 0 ? landData.industrialStorageLand / landData.residentialLand : 0,
+        value: safeDivide(safeGet(landData, 'industrialStorageLand'), safeGet(landData, 'residentialLand')),
         unit: "ratio",
         formula: "工矿仓储用地面积 / 住宅用地面积",
         description: "工业用地与住宅用地比值"
@@ -715,7 +1139,7 @@ async function calculateZonePotentials(areaName) {
 
       // 工矿仓储用地面积 / 已建成城镇建设用地面积
       industrialToBuiltRatio: {
-        value: landData.builtUrbanConstructionLand > 0 ? landData.industrialStorageLand / landData.builtUrbanConstructionLand : 0,
+        value: safeDivide(safeGet(landData, 'industrialStorageLand'), safeGet(landData, 'builtUrbanConstructionLand')),
         unit: "ratio",
         formula: "工矿仓储用地面积 / 已建成城镇建设用地面积",
         description: "工业用地占建成区比例"
@@ -726,7 +1150,7 @@ async function calculateZonePotentials(areaName) {
     intensityPotential: {
       // 工业仓储建筑面积 / 工矿仓储用地面积 (正向指标)
       industrialBuildingIntensity: {
-        value: landData.industrialStorageLand > 0 ? buildingData.industrialStorageBuildingArea / landData.industrialStorageLand : 0,
+        value: safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea'), safeGet(landData, 'industrialStorageLand')),
         unit: "ratio",
         formula: "工业仓储建筑面积 / 工矿仓储用地面积",
         description: "工业建筑开发强度(越高越好)"
@@ -734,8 +1158,10 @@ async function calculateZonePotentials(areaName) {
 
       // (已供应面积 - 已建面积) / 已供应面积 (负向指标，越小越好)
       landUtilizationGap: {
-        value: landData.suppliedStateConstructionLand > 0 ?
-          Math.max(0, landData.suppliedStateConstructionLand - landData.builtUrbanConstructionLand) / landData.suppliedStateConstructionLand : 0,
+        value: safeDivide(
+          Math.max(0, safeGet(landData, 'suppliedStateConstructionLand') - safeGet(landData, 'builtUrbanConstructionLand')),
+          safeGet(landData, 'suppliedStateConstructionLand')
+        ),
         unit: "ratio",
         formula: "(已供应面积 - 已建面积) / 已供应面积",
         description: "土地利用缺口(越小越好)"
@@ -745,14 +1171,14 @@ async function calculateZonePotentials(areaName) {
     // 管理潜力
     managementPotential: {
       idleLandArea: {
-        value: landData.idleLand,
+        value: safeGet(landData, 'idleLandArea'),
         unit: "hectare",
         formula: "闲置土地面积",
         description: "可通过管理优化的闲置土地面积"
       },
 
       idleLandRatio: {
-        value: landData.builtUrbanConstructionLand > 0 ? landData.idleLand / landData.builtUrbanConstructionLand : 0,
+        value: safeDivide(safeGet(landData, 'idleLandArea'), safeGet(landData, 'builtUrbanConstructionLand')),
         unit: "ratio",
         formula: "闲置土地面积 / 已建成面积",
         description: "闲置土地比例(越小越好)"
@@ -765,10 +1191,329 @@ async function calculateZonePotentials(areaName) {
   return potentials;
 }
 
-// 服务器启动时重建索引
-rebuildIndex();
+// 数据库管理API
+// GET 数据库状态
+app.get('/api/db/status', async (req, res) => {
+  try {
+    const status = await dbManager.checkStatus();
+    const stats = await dbManager.getStatistics();
+
+    res.json({
+      success: true,
+      status: status,
+      statistics: stats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// POST 初始化数据库
+app.post('/api/db/init', async (req, res) => {
+  try {
+    const result = await dbManager.initialize();
+    res.json({
+      success: true,
+      message: '数据库初始化完成',
+      result: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// POST 数据迁移
+app.post('/api/db/migrate', async (req, res) => {
+  try {
+    const migrator = new DataMigrator();
+    const result = await migrator.migrate();
+    res.json({
+      success: true,
+      message: '数据迁移完成',
+      result: result
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// GET 从数据库获取开发区索引（兼容现有API）
+app.get('/api/db/zones/index', async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({ error: '数据库连接不可用' });
+    }
+
+    const zones = await connection.many(`
+      SELECT
+        zone_name as name,
+        zone_code as code,
+        province,
+        city,
+        level,
+        status,
+        upload_time as uploadTime,
+        source,
+        created_at as createdAt,
+        updated_at as updatedAt
+      FROM development_zones
+      WHERE status = 'active'
+      ORDER BY zone_name
+    `);
+
+    res.json(zones);
+  } catch (error) {
+    console.error('获取开发区索引失败:', error);
+    res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+// GET 从数据库获取指定开发区地理数据（兼容现有API）
+app.get('/api/db/geojson/:name', async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({ error: '数据库连接不可用' });
+    }
+
+    const zoneName = decodeURIComponent(req.params.name);
+
+    // 获取开发区信息
+    const zone = await connection.oneOrNone(`
+      SELECT id, zone_name, zone_code, province, city, level
+      FROM development_zones
+      WHERE zone_name = $1 AND status = 'active'
+    `, [zoneName]);
+
+    if (!zone) {
+      return res.status(404).json({ error: '未找到该开发区数据' });
+    }
+
+    // 获取地理数据
+    const geoData = await connection.manyOrNone(`
+      SELECT
+        ST_AsGeoJSON(geometry) as geometry,
+        properties,
+        class_type as classType,
+        feature_name as featureName,
+        area_hectares as areaHectares
+      FROM geo_data
+      WHERE zone_id = $1
+    `, [zone.id]);
+
+    if (!geoData || geoData.length === 0) {
+      return res.status(404).json({ error: '未找到该开发区地理数据' });
+    }
+
+    // 构建GeoJSON格式
+    const features = geoData.map(item => {
+      const geometry = JSON.parse(item.geometry);
+      return {
+        type: 'Feature',
+        properties: {
+          ...item.properties,
+          zoneName: zone.zone_name,
+          zoneCode: zone.zone_code,
+          province: zone.province,
+          city: zone.city,
+          level: zone.level,
+          classType: item.classType,
+          featureName: item.featureName,
+          areaHectares: item.areaHectares
+        },
+        geometry: geometry
+      };
+    });
+
+    const geoJson = {
+      type: 'FeatureCollection',
+      features: features
+    };
+
+    res.json(geoJson);
+  } catch (error) {
+    console.error('获取开发区地理数据失败:', error);
+    res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+// GET 从数据库获取开发区详细数据
+app.get('/api/db/zones/:name/data', async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({ error: '数据库连接不可用' });
+    }
+
+    const zoneName = decodeURIComponent(req.params.name);
+
+    // 获取开发区基本信息
+    const zone = await connection.oneOrNone(`
+      SELECT id, zone_name, zone_code, province, city, district, level,
+             high_tech_enterprises, status, upload_time, created_at, updated_at
+      FROM development_zones
+      WHERE zone_name = $1 AND status = 'active'
+    `, [zoneName]);
+
+    if (!zone) {
+      return res.status(404).json({ error: '未找到该开发区数据' });
+    }
+
+    // 获取各类数据
+    const [landData, economicData, populationData, buildingData] = await Promise.all([
+      connection.manyOrNone('SELECT * FROM land_data WHERE zone_id = $1 ORDER BY data_year DESC', [zone.id]),
+      connection.manyOrNone('SELECT * FROM economic_data WHERE zone_id = $1 ORDER BY data_year DESC', [zone.id]),
+      connection.manyOrNone('SELECT * FROM population_data WHERE zone_id = $1 ORDER BY data_year DESC', [zone.id]),
+      connection.manyOrNone('SELECT * FROM building_data WHERE zone_id = $1 ORDER BY data_year DESC', [zone.id])
+    ]);
+
+    const responseData = {
+      zone: zone,
+      landData: landData[0] || null,
+      economicData: economicData[0] || null,
+      populationData: populationData[0] || null,
+      buildingData: buildingData[0] || null
+    };
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('获取开发区详细数据失败:', error);
+    res.status(500).json({ error: '获取数据失败' });
+  }
+});
+
+// GET 新的高级查询API
+app.get('/api/db/zones/search', async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({ error: '数据库连接不可用' });
+    }
+
+    const { q, province, level } = req.query;
+    let whereClause = 'WHERE status = \'active\'';
+    const params = [];
+    let paramIndex = 1;
+
+    if (q) {
+      whereClause += ` AND zone_name ILIKE $${paramIndex}`;
+      params.push(`%${q}%`);
+      paramIndex++;
+    }
+
+    if (province) {
+      whereClause += ` AND province = $${paramIndex}`;
+      params.push(province);
+      paramIndex++;
+    }
+
+    if (level) {
+      whereClause += ` AND level = $${paramIndex}`;
+      params.push(level);
+    }
+
+    const zones = await connection.many(`
+      SELECT
+        zone_name as name,
+        zone_code as code,
+        province,
+        city,
+        level,
+        high_tech_enterprises,
+        upload_time as uploadTime,
+        created_at as createdAt
+      FROM development_zones
+      ${whereClause}
+      ORDER BY zone_name
+    `, params);
+
+    res.json(zones);
+  } catch (error) {
+    console.error('搜索开发区失败:', error);
+    res.status(500).json({ error: '搜索失败' });
+  }
+});
+
+// GET 地理范围查询API
+app.get('/api/db/zones/bbox', async (req, res) => {
+  try {
+    if (!connection) {
+      return res.status(503).json({ error: '数据库连接不可用' });
+    }
+
+    const { minx, miny, maxx, maxy } = req.query;
+
+    if (!minx || !miny || !maxx || !maxy) {
+      return res.status(400).json({ error: '缺少边界框参数' });
+    }
+
+    const zones = await connection.many(`
+      SELECT DISTINCT
+        dz.zone_name as name,
+        dz.zone_code as code,
+        dz.province,
+        dz.city,
+        dz.level
+      FROM development_zones dz
+      INNER JOIN geo_data gd ON dz.id = gd.zone_id
+      WHERE dz.status = 'active'
+      AND ST_Intersects(gd.geometry, ST_MakeEnvelope($1, $2, $3, $4, 4326))
+      ORDER BY dz.zone_name
+    `, [parseFloat(minx), parseFloat(miny), parseFloat(maxx), parseFloat(maxy)]);
+
+    res.json(zones);
+  } catch (error) {
+    console.error('地理范围查询失败:', error);
+    res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 服务器启动时初始化
+async function initializeServer() {
+  try {
+    console.log('正在启动服务器...');
+
+    // 测试数据库连接
+    const connectionTest = await testConnection();
+    if (connectionTest.success) {
+      console.log('✅ 数据库连接正常');
+
+      // 初始化数据库
+      await dbManager.initialize();
+      console.log('✅ 数据库初始化完成');
+    } else {
+      console.log('⚠️  数据库连接失败，将使用文件系统模式');
+      console.log('   错误信息:', connectionTest.message);
+    }
+
+    // 重建文件索引（保持向后兼容）
+    rebuildIndex();
+    console.log('✅ 文件索引重建完成');
+
+    // 启动服务器
+    app.listen(8080, () => {
+      console.log('🚀 Server running on http://localhost:8080');
+      console.log('📊 API端点:');
+      console.log('   - GET /api/db/status    (数据库状态)');
+      console.log('   - POST /api/db/init     (初始化数据库)');
+      console.log('   - POST /api/db/migrate  (数据迁移)');
+      console.log('   - GET /api/db/zones/index  (开发区索引)');
+      console.log('   - GET /api/db/geojson/:name (地理数据)');
+      console.log('   - GET /api/db/zones/search?q=keyword (搜索)');
+      console.log('   - GET /api/db/zones/bbox?minx,miny,maxx,maxy (地理范围查询)');
+    });
+  } catch (error) {
+    console.error('❌ 服务器启动失败:', error);
+    process.exit(1);
+  }
+}
 
 // 启动服务器
-app.listen(8080, () => {
-  console.log('Server running on http://localhost:8080');
-});
+initializeServer();
