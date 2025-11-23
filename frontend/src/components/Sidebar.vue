@@ -24,7 +24,7 @@
         <input
           ref="fileInputRef"
           type="file"
-          accept=".geojson,.shp,.shx,.dbf"
+          accept=".geojson,.shp,.shx,.dbf,.prj"
           @change="handleUpload"
           class="upload-input"
           multiple
@@ -36,8 +36,12 @@
 
           <div class="upload-text">
             <div v-if="!isUploading">
-              <div class="primary-text">点击或拖拽文件到此处</div>
-              <div class="secondary-text">支持 GeoJSON (.geojson) 和 Shapefile (.shp, .shx, .dbf)</div>
+              <div class="primary-text">📂 点击或拖拽文件到此处</div>
+              <div class="secondary-text">
+                📄 支持 GeoJSON (.geojson) 或 Shapefile 文件组<br>
+                🔧 Shapefile需包含: .shp (几何) + .shx (索引) + .dbf (属性)<br>
+                💡 推荐: 同时上传 .prj 文件以确保坐标转换准确
+              </div>
             </div>
             <div v-else>
               <div class="primary-text">上传中...</div>
@@ -157,10 +161,10 @@ const filteredList = computed(() => {
   })
 })
 
-// 文件格式验证
+// 文件格式验证和类型识别
 const validateFiles = (files) => {
   const fileArray = Array.from(files)
-  const validExtensions = ['.geojson', '.shp', '.shx', '.dbf']
+  const validExtensions = ['.geojson', '.shp', '.shx', '.dbf', '.prj']
 
   const invalidFiles = fileArray.filter(file => {
     const ext = '.' + file.name.split('.').pop().toLowerCase()
@@ -169,17 +173,31 @@ const validateFiles = (files) => {
 
   if (invalidFiles.length > 0) {
     const invalidNames = invalidFiles.map(f => f.name).join(', ')
-    throw new Error(`不支持的文件格式: ${invalidNames}\\n支持的格式: GeoJSON (.geojson), Shapefile (.shp, .shx, .dbf)`)
+    throw new Error(`不支持的文件格式: ${invalidNames}\\n支持的格式: GeoJSON (.geojson), Shapefile (.shp, .shx, .dbf, .prj)`)
   }
 
-  // 检查Shapefile完整性
+  // 识别文件类型
+  const geojsonFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.geojson'))
   const shpFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.shp'))
   const shxFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.shx'))
   const dbfFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.dbf'))
+  const prjFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.prj'))
 
+  // 如果是GeoJSON文件，直接通过
+  if (geojsonFiles.length > 0 && shpFiles.length === 0) {
+    console.log('✅ 检测到GeoJSON文件')
+    return fileArray
+  }
+
+  // 如果是Shapefile文件，进行完整性检查
   if (shpFiles.length > 0) {
+    console.log('🔍 检测到Shapefile文件，进行完整性检查...')
+
     if (shxFiles.length === 0 || dbfFiles.length === 0) {
-      throw new Error('上传Shapefile文件不完整，请确保同时包含 .shp、.shx 和 .dbf 文件')
+      const missing = []
+      if (shxFiles.length === 0) missing.push('.shx')
+      if (dbfFiles.length === 0) missing.push('.dbf')
+      throw new Error(`Shapefile文件不完整\\n缺少必要文件: ${missing.join(', ')}\\n\\n📁 完整的Shapefile应包含:\\n• .shp (几何数据)\\n• .shx (索引文件)\\n• .dbf (属性数据)\\n• .prj (投影文件 - 可选，推荐包含)\\n\\n💡 建议: 如果有.prj文件，请一并上传以确保坐标转换准确`)
     }
 
     // 检查Shapefile文件组是否完整（确保每个.shp文件都有对应的.shx和.dbf文件）
@@ -188,14 +206,23 @@ const validateFiles = (files) => {
     for (const baseName of shpBaseNames) {
       const hasShx = shxFiles.some(f => f.name.replace(/\.shx$/i, '') === baseName)
       const hasDbf = dbfFiles.some(f => f.name.replace(/\.dbf$/i, '') === baseName)
+      const hasPrj = prjFiles.some(f => f.name.replace(/\.prj$/i, '') === baseName)
 
       if (!hasShx || !hasDbf) {
         const missingFiles = []
         if (!hasShx) missingFiles.push(`${baseName}.shx`)
         if (!hasDbf) missingFiles.push(`${baseName}.dbf`)
-        throw new Error(`Shapefile文件不完整\n文件 "${baseName}.shp" 缺少对应的文件: ${missingFiles.join(', ')}\n\n请确保每个.shp文件都有配套的.shx和.dbf文件`)
+        throw new Error(`Shapefile文件不完整\\n文件 "${baseName}.shp" 缺少对应的文件: ${missingFiles.join(', ')}\\n\\n请确保每个.shp文件都有配套的.shx和.dbf文件`)
+      }
+
+      if (!hasPrj) {
+        console.warn(`⚠️ 未找到 ${baseName}.prj 文件，将使用默认投影转换，精度可能较低`)
+        // 这里可以显示警告，但不阻止上传
       }
     }
+
+    console.log('✅ Shapefile文件检查通过')
+    console.log(`📊 上传统计: ${shpFiles.length}个.shp, ${shxFiles.length}个.shx, ${dbfFiles.length}个.dbf, ${prjFiles.length}个.prj`)
   }
 
   return fileArray
@@ -275,10 +302,26 @@ const uploadFiles = async (files) => {
       recentUploads.value = recentUploads.value.slice(0, 5)
     }
 
-    // 通知父组件
-    emit('upload', {
+    // 添加调试信息和数据验证
+    console.log('API响应结果:', result);
+    console.log('传递给父组件的数据:', {
       files: files,
       result: result.data,
+      type: detectFileType(files)
+    });
+
+    // 确保传递给父组件的数据结构正确
+    emit('upload', {
+      files: files,
+      result: {
+        name: result.data.name || result.data.fileName?.replace('.json', '') || `upload_${Date.now()}`,
+        source: result.data.source,
+        featureCount: result.data.featureCount,
+        type: result.data.type,
+        features: result.data.features,
+        geojson: result.data.geojson,
+        ...result.data
+      },
       type: detectFileType(files)
     })
 

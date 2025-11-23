@@ -450,14 +450,27 @@ const handleFileUpload = async (fileData) => {
   console.log('收到上传事件:', fileData);
 
   // 处理后端上传的情况（GeoJSON和Shapefile都通过后端处理）
-  if (fileData.result && fileData.result.name) {
-    console.log(`处理后端上传的文件: ${fileData.result.name}`);
+  if (fileData.result) {
+    console.log('收到后端处理结果:', fileData.result);
+
+    // 尝试多种可能的名称字段
+    const areaName = fileData.result.name ||
+                     fileData.result.fileName?.replace('.json', '') ||
+                     fileData.result.displayName ||
+                     `upload_${Date.now()}`;
+
+    console.log(`处理后端上传的文件: ${areaName}`, {
+      source: fileData.result.source,
+      featureCount: fileData.result.featureCount,
+      hasGeojson: !!fileData.result.geojson,
+      type: fileData.result.type
+    });
 
     // 重新加载索引列表
     await reloadAreaList();
 
     // 加载新上传的数据
-    await loadNewUpload(fileData.result.name);
+    await loadNewUpload(areaName, fileData.result);
   }
   // 处理前端直接处理的文件（保留原有逻辑）
   else if (fileData.files && Array.isArray(fileData.files)) {
@@ -1104,29 +1117,60 @@ const reloadAreaList = async () => {
 }
 
 // 加载新上传的数据
-const loadNewUpload = async (name) => {
+const loadNewUpload = async (name, uploadResult = null) => {
   try {
-    console.log(`🔄 加载新上传的数据: ${name}`);
-
-    // 获取新上传的数据
-    const areaData = await fetchGeojson(name);
-
-    if (!areaData) {
-      console.warn(`⚠️ 无法获取 ${name} 的数据`);
-      return;
-    }
+    console.log(`🔄 加载新上传的数据: ${name}`, uploadResult ? '(使用上传结果)' : '(从服务器获取)');
 
     let geojsonData;
-    // 兼容新旧数据结构
-    if (areaData.geojson) {
-      // 旧格式：{ name: string, geojson: FeatureCollection }
-      geojsonData = areaData.geojson;
-    } else if (areaData.type === 'FeatureCollection') {
-      // 新格式：直接是FeatureCollection
-      geojsonData = areaData;
-    } else {
-      console.warn(`⚠️ 未知的数据格式: ${name}`);
-      return;
+    let areaData;
+
+    // 优先使用上传结果中的数据（避免重复请求）
+    if (uploadResult) {
+      console.log('直接使用上传结果数据:', uploadResult);
+
+      // 检查上传结果中是否包含GeoJSON数据
+      if (uploadResult.type === 'FeatureCollection' && uploadResult.features) {
+        // 直接是FeatureCollection格式
+        geojsonData = uploadResult;
+        console.log(`✅ 使用直接Feature格式，包含 ${uploadResult.features.length} 个要素`);
+      } else if (uploadResult.geojson) {
+        // 嵌套的geojson字段
+        geojsonData = uploadResult.geojson;
+        console.log(`✅ 使用嵌套geojson格式`);
+      } else {
+        // 尝试从服务器获取数据
+        console.log('上传结果中没有GeoJSON数据，尝试从服务器获取...');
+        areaData = await fetchGeojson(name);
+        if (!areaData) {
+          console.warn(`⚠️ 无法获取 ${name} 的数据`);
+          return;
+        }
+      }
+    }
+
+    // 如果没有直接数据，从服务器获取
+    if (!geojsonData) {
+      console.log('从服务器获取GeoJSON数据...');
+      areaData = await fetchGeojson(name);
+
+      if (!areaData) {
+        console.warn(`⚠️ 无法获取 ${name} 的数据`);
+        return;
+      }
+
+      // 兼容多种数据结构
+      if (areaData.geojson) {
+        // 旧格式：{ name: string, geojson: FeatureCollection }
+        geojsonData = areaData.geojson;
+        console.log('✅ 使用旧格式（嵌套geojson）');
+      } else if (areaData.type === 'FeatureCollection') {
+        // 新格式：直接是FeatureCollection
+        geojsonData = areaData;
+        console.log('✅ 使用新格式（直接FeatureCollection）');
+      } else {
+        console.warn(`⚠️ 未知的数据格式: ${name}`, areaData);
+        return;
+      }
     }
 
     // 加载到���图
