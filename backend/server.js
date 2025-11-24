@@ -7,6 +7,10 @@ const cors = require('cors');
 const shapefile = require('shapefile');
 const proj4 = require('proj4');
 
+// 导入新的投影检测和坐标转换模块
+const ProjectionDetector = require('./services/projectionDetector');
+const CoordinateTransformer = require('./services/coordinateTransformer');
+
 // 数据库相关引用
 const { connection, testConnection } = require('./db/connection');
 const dbManager = require('./db/database');
@@ -20,6 +24,21 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const upload = multer({ dest: 'uploads/' });
+
+// 初始化新的投影检测和坐标转换器
+let projectionDetector;
+let coordinateTransformer;
+
+try {
+  projectionDetector = new ProjectionDetector();
+  coordinateTransformer = new CoordinateTransformer();
+  console.log('✅ 投影检测和坐标转换模块初始化成功');
+} catch (error) {
+  console.error('❌ 投影检测和坐标转换模块初始化失败:', error);
+  // 降级处理：继续使用旧系统
+  projectionDetector = null;
+  coordinateTransformer = null;
+}
 
 // 多文件上传存储配置（用于Shapefile）
 const multiUpload = multer({
@@ -935,10 +954,10 @@ async function convertShapefileFromBuffer(shpBuffer, dbfBuffer, outputName, opti
 
     // 处理所有要素
     if (result && result.type === 'FeatureCollection') {
-      result.features.forEach(feature => {
+      for (const feature of result.features) {
         // 坐标系统转换：检测并转换投影坐标
         if (feature.geometry && feature.geometry.coordinates) {
-          feature.geometry = transformCoordinates(feature.geometry, prjFile);
+          feature.geometry = await transformCoordinates(feature.geometry, prjFile);
         }
 
         // 添加基本属性
@@ -950,11 +969,11 @@ async function convertShapefileFromBuffer(shpBuffer, dbfBuffer, outputName, opti
         }
 
         features.push(feature);
-      });
+      }
     } else if (result) {
       // 如果是单个feature
       if (result.geometry && result.geometry.coordinates) {
-        result.geometry = transformCoordinates(result.geometry, prjFile);
+        result.geometry = await transformCoordinates(result.geometry, prjFile);
       }
 
       if (result.properties) {
@@ -1006,14 +1025,14 @@ function detectEncoding(buffer) {
 }
 
 // 坐标转换函数：检测并转换投影坐标系到WGS84
-function transformCoordinates(geometry) {
+async function transformCoordinates(geometry) {
   try {
     const coords = geometry.coordinates;
 
     // 检测是否为投影坐标系（大数值坐标）
     if (isProjectedCoordinate(coords)) {
       console.log('检测到投影坐标系，开始转换...');
-      const transformedCoords = transformProjectToWGS84(coords);
+      const transformedCoords = await transformProjectToWGS84(coords);
       return {
         ...geometry,
         coordinates: transformedCoords
@@ -1094,16 +1113,23 @@ function findMatchingProjection(prjContent, projectionMap) {
   const regexPatterns = [
     // CGCS2000 3度带高斯投影
     /CGCS2000.*3.*DEGREE.*GK.*CM(\d+)E/i,
+    /CGCS2000.*3.*DEGREE.*GK.*ZONE.*(\d+)/i,
     // 西安1980 3度带高斯投影
     /XIAN.*1980.*3.*DEGREE.*GK.*CM(\d+)E/i,
+    /XIAN.*1980.*3.*DEGREE.*GK.*ZONE.*(\d+)/i,
     // 北京1954 3度带高斯投影
     /BEIJING.*1954.*3.*DEGREE.*GK.*CM(\d+)E/i,
+    /BEIJING.*1954.*3.*DEGREE.*GK.*ZONE.*(\d+)/i,
     // 通用3度带高斯投影
     /3.*DEGREE.*GK.*CM(\d+)E/i,
+    /3.*DEGREE.*GK.*ZONE.*(\d+)/i,
     // 6度带高斯投影
     /6.*DEGREE.*GK.*CM(\d+)E/i,
+    /6.*DEGREE.*GK.*ZONE.*(\d+)/i,
     // 中央经线匹配
     /CM(\d+)E/i,
+    // Zone匹配
+    /ZONE.*(\d+)/i,
     // 投影名称匹配
     /PROJCS\[["']([^"']+)["']/i
   ];
@@ -1114,8 +1140,15 @@ function findMatchingProjection(prjContent, projectionMap) {
       console.log(`🔍 正则匹配成功: ${pattern.toString()}, 匹配结果: ${match[0]}`);
 
       // 尝试根据匹配结果推断投影参数
-      if (match[1]) { // 匹配到中央经线
-        const centralMeridian = parseInt(match[1]);
+      if (match[1]) { // 匹配到中央经线或Zone号
+        let centralMeridian = parseInt(match[1]);
+
+        // 如果匹配到的是Zone号，需要转换为中央经线
+        if (pattern.toString().includes('ZONE')) {
+          centralMeridian = zoneToCentralMeridian(centralMeridian);
+          console.log(`Zone ${match[1]} 转换为中央经线: ${centralMeridian}`);
+        }
+
         const foundProjection = inferProjectionFromCentralMeridian(centralMeridian, normalizedContent);
         if (foundProjection) {
           return {
@@ -1143,6 +1176,13 @@ function findMatchingProjection(prjContent, projectionMap) {
   }
 
   return null;
+}
+
+// 将3度带Zone号转换为中央经线
+function zoneToCentralMeridian(zoneNumber) {
+  // 3度带分带: Zone 25 = 75E, Zone 26 = 78E, Zone 27 = 81E, ...
+  // 公式: 中央经线 = 75 + (ZoneNumber - 25) * 3
+  return 75 + (zoneNumber - 25) * 3;
 }
 
 // 根据中央经线推断投影定义
@@ -1394,6 +1434,8 @@ function readProjectionFromPRJ(prjFile) {
       'PROJCS["CGCS2000_3_Degree_GK_CM_129E"': '+proj=tmerc +lat_0=0 +lon_0=129 +k=1 +x_0=49500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
       'PROJCS["CGCS2000_3_Degree_GK_CM_132E"': '+proj=tmerc +lat_0=0 +lon_0=132 +k=1 +x_0=52500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
       'PROJCS["CGCS2000_3_Degree_GK_CM_135E"': '+proj=tmerc +lat_0=0 +lon_0=135 +k=1 +x_0=55500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
+      // Zone 39 对应的投影 (中央经线117E，假东偏移39500000)
+      'PROJCS["CGCS2000_3_Degree_GK_Zone_39"': '+proj=tmerc +lat_0=0 +lon_0=117 +k=1 +x_0=39500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs',
 
       // 西安1980坐标系 - 3度带高斯投影
       'PROJCS["Xian_1980_3_Degree_GK_CM_75E"': '+proj=tmerc +lat_0=0 +lon_0=75 +k=1 +x_0=25500000 +y_0=0 +a=6378140 +b=6356755.288157528 +towgs84=12.7,-131.3,-44.7,0,0,0,0 +units=m +no_defs',
@@ -1540,8 +1582,53 @@ function readProjectionFromPRJ(prjFile) {
   }
 }
 
-// 使用proj4进行准确的坐标转换
-function transformProjectToWGS84(coords, prjFile = null) {
+// 使用新的坐标转换器进行准确的坐标转换
+async function transformProjectToWGS84(coords, prjFile = null) {
+  console.log('🔄 使用新的坐标转换器开始转换...');
+
+  try {
+    // 优先使用新的坐标转换器
+    if (coordinateTransformer) {
+      // 读取PRJ文件内容（如果提供了文件路径）
+      let prjContent = null;
+      if (prjFile) {
+        if (typeof prjFile === 'string') {
+          // 如果是文件路径，读取文件
+          try {
+            prjContent = fs.readFileSync(prjFile, 'utf-8');
+            console.log(`✅ 成功读取PRJ文件: ${prjFile}`);
+          } catch (error) {
+            console.warn(`⚠️ 无法读取PRJ文件 ${prjFile}:`, error.message);
+          }
+        } else {
+          // 如果直接提供了PRJ内容
+          prjContent = prjFile;
+        }
+      }
+
+      // 使用新的坐标转换器
+      const result = await coordinateTransformer.transformCoordinates(coords, prjContent, {
+        fallbackToOriginal: true // 如果转换失败，返回原始坐标
+      });
+
+      console.log('✅ 新坐标转换器转换完成');
+      return result;
+    }
+
+    // 降级处理：使用旧系统
+    console.log('⚠️ 新坐标转换器不可用，使用旧系统');
+    return transformProjectToWGS84Legacy(coords, prjFile);
+
+  } catch (error) {
+    console.error('❌ 坐标转换失败，使用降级方案:', error.message);
+    return transformProjectToWGS84Legacy(coords, prjFile);
+  }
+}
+
+// 旧的坐标转换函数（作为降级方案）
+function transformProjectToWGS84Legacy(coords, prjFile = null) {
+  console.log('🔄 使用旧坐标转换系统...');
+
   // 优先使用PRJ文件的投影定义
   let projectionDef = null;
   let projectionName = null;
@@ -1623,7 +1710,17 @@ function transformProjectToWGS84(coords, prjFile = null) {
     return arr.map(transformRecursive);
   };
 
-  return transformRecursive(coords);
+  try {
+    const startTime = Date.now();
+    const result = transformRecursive(coords);
+    const processingTime = Date.now() - startTime;
+    console.log(`✅ 旧坐标转换完成，耗时: ${processingTime}ms`);
+
+    return result;
+  } catch (error) {
+    console.error('❌ 旧坐标转换失败:', error);
+    return coords; // 返回原始坐标
+  }
 }
 
 // 处理上传的Shapefile文件
