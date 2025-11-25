@@ -1,9 +1,11 @@
 <template>
   <div class="main">
     <Header
-      @showChart="chartVisible = !chartVisible"
+      @showRanking="rankingVisible = !rankingVisible"
       @showExcelImport="showExcelImport"
       @showZoneManagement="showZoneManagement"
+      @showIndicatorsTable="showIndicatorsTable"
+      @showPotentialTable="showPotentialTable"
     />
 
     <div class="container">
@@ -17,10 +19,11 @@
       />
       <div id="cesiumContainer" class="map"></div>
 
-      <ChartPanel
-        :visible="chartVisible"
-        :data="landPotentialData"
-        @close="chartVisible = false"
+  
+      <!-- 开发区排名面板 -->
+      <RankingPanel
+        :visible="rankingVisible"
+        @close="rankingVisible = false"
       />
       
       <PropertyPanel
@@ -54,6 +57,7 @@
         @close="potentialVisible = false"
       />
 
+
       <!-- 数据编辑面板 -->
       <ZoneDataEditor
         :visible="editorVisible"
@@ -61,7 +65,19 @@
         @close="editorVisible = false"
         @saved="handleDataSaved"
       />
-      
+
+      <!-- 开发区指标汇总表 -->
+      <DataTable
+        :visible="indicatorsTableVisible"
+        @close="indicatorsTableVisible = false"
+      />
+
+      <!-- 开发区潜力汇总表 -->
+      <PotentialSummaryTable
+        :visible="potentialTableVisible"
+        @close="potentialTableVisible = false"
+      />
+
       <!-- 添加图例说明 -->
       <div class="legend" v-if="showLegend">
         <h3>土地利用类型图例</h3>
@@ -80,12 +96,14 @@ import * as Cesium from 'cesium'
 import * as GeoTIFF from 'geotiff'
 import Header from '../components/Header.vue'
 import Sidebar from '../components/Sidebar.vue'
-import ChartPanel from '../components/ChartPanel.vue'
+import RankingPanel from '../components/RankingPanel.vue'
 import PropertyPanel from '../components/PropertyPanel.vue'
 import ExcelImportModal from '../components/ExcelImportModal.vue'
 import IndicatorPanel from '../components/IndicatorPanel.vue'
 import PotentialPanel from '../components/PotentialPanel.vue'
 import ZoneDataEditor from '../components/ZoneDataEditor.vue'
+import DataTable from '../components/DataTable.vue'
+import PotentialSummaryTable from '../components/PotentialSummaryTable.vue'
 import {
   fetchGeojsonIndex,
   fetchGeojson,
@@ -106,7 +124,7 @@ const areaList = ref([])                 // 开发区名称列表
 const entityMap = ref({})                // 名称 => Entity
 const areaMeta = ref({})                 // 名称 => { province }
 const viewerRef = ref(null)
-const chartVisible = ref(false)
+const rankingVisible = ref(false)        // 开发区排名面板可见性
 const propertyVisible = ref(false)       // 属性面板是否可见
 const selectedAreaName = ref('')         // 选中的开发区名称
 const selectedProperties = ref({})       // 选中的开发区属性
@@ -117,36 +135,27 @@ const excelImportVisible = ref(false)    // Excel导入模态框可见性
 const indicatorVisible = ref(false)      // 评价指标面板可见性
 const potentialVisible = ref(false)      // 潜力分析面板可见性
 const editorVisible = ref(false)         // 数据编辑面板可见性
+const indicatorsTableVisible = ref(false)   // 指标汇总表可见性
+const potentialTableVisible = ref(false)     // 潜力汇总表可见性
 const zoneList = ref([])                 // Excel导入的开发区列表
 
 // 土地利用类型颜色映射
 const classColors = {
-  0: Cesium.Color.PINK.withAlpha(0.7),        // 居住用地
-  1: Cesium.Color.DARKBLUE.withAlpha(0.7),    // 商务办公用地
-  2: Cesium.Color.ORANGE.withAlpha(0.7),      // 商业服务用地
-  3: Cesium.Color.RED.withAlpha(0.7),         // 工业用地
-  4: Cesium.Color.GRAY.withAlpha(0.7),        // 交通枢纽用地
-  5: Cesium.Color.LIGHTGRAY.withAlpha(0.7),   // 机场设施用地
-  6: Cesium.Color.PURPLE.withAlpha(0.7),      // 行政办公用地
-  7: Cesium.Color.YELLOW.withAlpha(0.7),      // 教育用地
-  8: Cesium.Color.CYAN.withAlpha(0.7),        // 医疗卫生用地
-  9: Cesium.Color.BROWN.withAlpha(0.7),       // 体育与文化用地
-  10: Cesium.Color.GREEN.withAlpha(0.7)       // 公园与绿地用地
+  1: Cesium.Color.PINK.withAlpha(0.7),        
+  2: Cesium.Color.RED.withAlpha(0.7),         
+  3: Cesium.Color.GRAY.withAlpha(0.7),        
+  4: Cesium.Color.GREEN.withAlpha(0.7),       
+  5: Cesium.Color.ORANGE.withAlpha(0.7),
+  6: Cesium.Color.LIGHTGRAY.withAlpha(0.7),
 }
-
 // 土地利用类型名称映射
 const classNames = {
-  0: "居住用地",
-  1: "商务办公用地",
-  2: "商业服务用地",
-  3: "工业用地",
-  4: "交通枢纽用地",
-  5: "机场设施用地",
-  6: "行政办公用地",
-  7: "教育用地",
-  8: "医疗卫生用地",
-  9: "体育与文化用地",
-  10: "公园与绿地用地"
+  1: "居住区",
+  2: "工业区",
+  3: "交通用地",
+  4: "公共设施",
+  5: "商业区",
+  6: "未开发土地",
 }
 
 // 将Cesium颜色转换为十六进制颜色
@@ -162,14 +171,6 @@ const getColorByClass = (classValue) => {
   return classColors[classValue] || Cesium.Color.YELLOW.withAlpha(0.5); // 默认黄色
 }
 
-// 用地潜力（示例数据）
-const landPotentialData = ref([
-  { name: '安徽绩溪经济开发区', level: 4.2 },
-  { name: '郴州高新技术产业开发区', level: 3.8 },
-  { name: '福建屏南工业园区', level: 3.5 },
-  { name: '抚州高新技术产业开发区', level: 2.9 },
-  { name: '广西梧州长洲工业园区', level: 2.1 }
-])
 
 // 默认静态 GeoJSON
 const defaultGeojsonList = [
@@ -433,6 +434,14 @@ const showZoneManagement = () => {
   } else {
     alert('请先导入Excel数据以进行开发区数据管理')
   }
+}
+
+const showIndicatorsTable = () => {
+  indicatorsTableVisible.value = true
+}
+
+const showPotentialTable = () => {
+  potentialTableVisible.value = true
 }
 
 // 文件上传处理（导入 + 保存后端）

@@ -1,9 +1,9 @@
 <template>
-  <div class="indicators-table-overlay" v-if="visible" @click.self="closeTable">
-    <div class="indicators-table-container">
+  <div class="potential-summary-overlay" v-if="visible" @click.self="closeTable">
+    <div class="potential-summary-container">
       <div class="table-header">
         <div class="header-content">
-          <h3>开发区指标汇总表</h3>
+          <h3>开发区用地潜力汇总表</h3>
           <button class="close-btn" @click="closeTable">×</button>
         </div>
 
@@ -39,22 +39,22 @@
       <div class="table-content">
         <div v-if="loading" class="loading-state">
           <div class="loading-spinner">⏳</div>
-          <div>正在加载指标数据...</div>
+          <div>正在加载潜力数据...</div>
         </div>
 
         <div v-else-if="error" class="error-state">
           <div class="error-icon">⚠️</div>
           <div>{{ error }}</div>
-          <button @click="loadIndicatorsData" class="retry-btn">重试</button>
+          <button @click="loadPotentialData" class="retry-btn">重试</button>
         </div>
 
         <div v-else-if="filteredData.length === 0" class="empty-state">
           <div class="empty-icon">📊</div>
-          <div>{{ searchQuery ? '未找到匹配的开发区' : '暂无指标数据' }}</div>
+          <div>{{ searchQuery ? '未找到匹配的开发区' : '暂无潜力数据' }}</div>
         </div>
 
         <div v-else class="table-wrapper">
-          <table class="indicators-table">
+          <table class="potential-table">
             <thead>
               <tr>
                 <th
@@ -75,9 +75,9 @@
                 <td
                   v-for="column in columns"
                   :key="column.key"
-                  :class="getColumnClass(column.key)"
+                  :class="getColumnClass(column.key, item[column.key])"
                 >
-                  {{ formatIndicatorValue(item[column.key], column.key) }}
+                  {{ formatPotentialValue(item[column.key], column.key) }}
                 </td>
               </tr>
             </tbody>
@@ -93,16 +93,16 @@
             <div class="card-value">{{ totalZones }}</div>
           </div>
           <div class="summary-card">
-            <div class="card-title">平均综合得分</div>
-            <div class="card-value">{{ averageScore.toFixed(1) }}</div>
+            <div class="card-title">高潜力开发区</div>
+            <div class="card-value">{{ highPotentialCount }}</div>
           </div>
           <div class="summary-card">
-            <div class="card-title">最高得分</div>
-            <div class="card-value">{{ highestScore.toFixed(1) }}</div>
+            <div class="card-title">中潜力开发区</div>
+            <div class="card-value">{{ mediumPotentialCount }}</div>
           </div>
           <div class="summary-card">
-            <div class="card-title">平均土地开发率</div>
-            <div class="card-value">{{ averageLandDevRate.toFixed(1) }}%</div>
+            <div class="card-title">平均潜力指数</div>
+            <div class="card-value">{{ averagePotential.toFixed(1) }}</div>
           </div>
         </div>
       </div>
@@ -135,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   visible: {
@@ -154,26 +154,22 @@ const sortField = ref('开发区名称')
 const sortDirection = ref('asc')
 const currentPage = ref(1)
 const rowsPerPage = ref(25)
-const indicatorsData = ref([])
+const potentialData = ref([])
 
 // 表格列定义
 const columns = ref([
   { key: '开发区名称', title: '开发区名称', sortable: true },
-  { key: '开发区综合评估分数', title: '综合得分', sortable: true },
-  { key: '土地开发率', title: '土地开发率(%)', sortable: true },
-  { key: '工业用地率', title: '工业用地率(%)', sortable: true },
-  { key: '综合容积率', title: '综合容积率', sortable: true },
-  { key: '工业用地综合容积率', title: '工业用地容积率', sortable: true },
-  { key: '固定资产投资强度', title: '固定资产投资强度(万元/公顷)', sortable: true },
-  { key: '土地闲置率', title: '土地闲置率(%)', sortable: true },
-  { key: '地均税收', title: '地均税收(万元/公顷)', sortable: true },
-  { key: '人均建设用地', title: '人均建设用地(m²/人)', sortable: true },
-  { key: '地均企业收入', title: '地均企业收入(万元/公顷)', sortable: true }
+  { key: '扩展潜力', title: '扩展潜力', sortable: true },
+  { key: '结构潜力', title: '结构潜力', sortable: true },
+  { key: '强度潜力', title: '强度潜力', sortable: true },
+  { key: '管理潜力', title: '管理潜力', sortable: true },
+  { key: '综合潜力', title: '综合潜力', sortable: true },
+  { key: '潜力等级', title: '潜力等级', sortable: true }
 ])
 
 // 计算属性
 const filteredData = computed(() => {
-  let data = indicatorsData.value
+  let data = potentialData.value
 
   // 搜索过滤
   if (searchQuery.value) {
@@ -190,7 +186,7 @@ const filteredData = computed(() => {
       let bVal = b[sortField.value]
 
       // 数值字段排序
-      if (sortField.value !== '开发区名称') {
+      if (sortField.value !== '开发区名称' && sortField.value !== '潜力等级') {
         const aNum = parseFloat(aVal) || 0
         const bNum = parseFloat(bVal) || 0
         aVal = aNum
@@ -216,27 +212,25 @@ const paginatedData = computed(() => {
 })
 
 // 统计计算
-const totalZones = computed(() => indicatorsData.value.length)
-const averageScore = computed(() => {
-  const scores = indicatorsData.value.map(item => parseFloat(item.开发区综合评估分数) || 0)
-  return scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0
+const totalZones = computed(() => potentialData.value.length)
+const averagePotential = computed(() => {
+  const potentials = potentialData.value.map(item => parseFloat(item.综合潜力) || 0)
+  return potentials.length > 0 ? potentials.reduce((a, b) => a + b, 0) / potentials.length : 0
 })
-const highestScore = computed(() => {
-  const scores = indicatorsData.value.map(item => parseFloat(item.开发区综合评估分数) || 0)
-  return scores.length > 0 ? Math.max(...scores) : 0
+const highPotentialCount = computed(() => {
+  return potentialData.value.filter(item => item.潜力等级 === '高').length
 })
-const averageLandDevRate = computed(() => {
-  const rates = indicatorsData.value.map(item => parseFloat(item.土地开发率) || 0)
-  return rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0
+const mediumPotentialCount = computed(() => {
+  return potentialData.value.filter(item => item.潜力等级 === '中').length
 })
 
 // 方法
-const loadIndicatorsData = async () => {
+const loadPotentialData = async () => {
   loading.value = true
   error.value = ''
 
   try {
-    const response = await fetch('http://localhost:8080/api/zones/indicators-summary')
+    const response = await fetch('http://localhost:8080/api/zones/potential-summary')
 
     if (!response.ok) {
       throw new Error(`获取数据失败 (${response.status})`)
@@ -245,48 +239,45 @@ const loadIndicatorsData = async () => {
     const result = await response.json()
 
     if (!result.success) {
-      throw new Error(result.error || '获取指标数据失败')
+      throw new Error(result.error || '获取潜力数据失败')
     }
 
-    indicatorsData.value = result.data || []
-    console.log('加载指标数据成功:', indicatorsData.value.length, '条记录')
+    potentialData.value = result.data || []
+    console.log('加载潜力数据成功:', potentialData.value.length, '条记录')
 
   } catch (err) {
-    console.error('加载指标数据失���:', err)
+    console.error('加载潜力数据失败:', err)
     error.value = err.message || '网络错误，请稍后重试'
   } finally {
     loading.value = false
   }
 }
 
-const formatIndicatorValue = (value, key) => {
+const formatPotentialValue = (value, key) => {
   if (value === null || value === undefined || value === '') return '-'
 
-  if (key === '开发区名称') {
+  if (key === '开发区名称' || key === '潜力等级') {
     return value
   }
 
   const numValue = parseFloat(value)
   if (isNaN(numValue)) return value
 
-  // 根据不同指标设置小数位数
-  if (key.includes('率') || key.includes('比重')) {
-    return numValue.toFixed(1) + '%'
-  } else if (key.includes('容积率')) {
-    return numValue.toFixed(2)
-  } else if (key.includes('强度') || key.includes('税收') || key.includes('收入')) {
-    return numValue.toFixed(0)
-  } else if (key.includes('人均')) {
-    return numValue.toFixed(0)
-  } else {
-    return numValue.toFixed(1)
-  }
+  // 潜力指标统一显示2位小数
+  return numValue.toFixed(2)
 }
 
-const getColumnClass = (key) => {
+const getColumnClass = (key, value) => {
   if (key === '开发区名称') return 'name-column'
-  if (key.includes('率')) return 'rate-column'
-  if (key.includes('得分')) return 'score-column'
+  if (key === '潜力等级') {
+    if (value === '高') return 'potential-high'
+    if (value === '中') return 'potential-medium'
+    if (value === '低') return 'potential-low'
+    return 'potential-column'
+  }
+  if (key.includes('潜力') && parseFloat(value) >= 80) return 'potential-high'
+  if (key.includes('潜力') && parseFloat(value) >= 60) return 'potential-medium'
+  if (key.includes('潜��') && parseFloat(value) > 0) return 'potential-low'
   return 'numeric-column'
 }
 
@@ -305,7 +296,7 @@ const exportData = () => {
   // 创建CSV内容
   const headers = columns.value.map(col => col.title)
   const rows = filteredData.value.map(item =>
-    columns.value.map(col => formatIndicatorValue(item[col.key], col.key))
+    columns.value.map(col => formatPotentialValue(item[col.key], col.key))
   )
 
   const csvContent = [
@@ -320,7 +311,7 @@ const exportData = () => {
   // 下载文件
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
-  link.download = `开发区指标汇总_${new Date().toISOString().split('T')[0]}.csv`
+  link.download = `开发区潜力汇总表_${new Date().toISOString().split('T')[0]}.csv`
   link.click()
   URL.revokeObjectURL(link.href)
 }
@@ -332,7 +323,7 @@ const closeTable = () => {
 // 监听器
 watch(() => props.visible, (newVal) => {
   if (newVal) {
-    loadIndicatorsData()
+    loadPotentialData()
     currentPage.value = 1
     searchQuery.value = ''
   }
@@ -342,7 +333,7 @@ watch(() => rowsPerPage.value, () => {
   currentPage.value = 1
 })
 
-watch(() => totalItems.value, (newTotal) => {
+watch(() => totalItems.value, () => {
   if (currentPage.value > totalPages.value && totalPages.value > 0) {
     currentPage.value = totalPages.value
   }
@@ -350,7 +341,7 @@ watch(() => totalItems.value, (newTotal) => {
 </script>
 
 <style scoped>
-.indicators-table-overlay {
+.potential-summary-overlay {
   position: fixed;
   top: 0;
   left: 0;
@@ -363,12 +354,12 @@ watch(() => totalItems.value, (newTotal) => {
   z-index: 1000;
 }
 
-.indicators-table-container {
+.potential-summary-container {
   background: white;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   width: 95vw;
-  max-width: 1400px;
+  max-width: 1600px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -377,7 +368,7 @@ watch(() => totalItems.value, (newTotal) => {
 
 .table-header {
   border-bottom: 2px solid #e0e0e0;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
 }
 
 .header-content {
@@ -389,7 +380,7 @@ watch(() => totalItems.value, (newTotal) => {
 
 .header-content h3 {
   margin: 0;
-  color: #2c3e50;
+  color: #1e40af;
   font-size: 20px;
   font-weight: 700;
 }
@@ -441,9 +432,9 @@ watch(() => totalItems.value, (newTotal) => {
 }
 
 .search-input:focus {
-  border-color: #1890ff;
+  border-color: #1e40af;
   outline: none;
-  box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1);
+  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
 }
 
 .per-page-select {
@@ -457,7 +448,7 @@ watch(() => totalItems.value, (newTotal) => {
 
 .export-btn {
   padding: 10px 18px;
-  background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
   border: none;
   border-radius: 8px;
@@ -465,12 +456,12 @@ watch(() => totalItems.value, (newTotal) => {
   font-size: 14px;
   font-weight: 500;
   transition: all 0.3s;
-  box-shadow: 0 2px 8px rgba(82, 196, 26, 0.3);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
 }
 
 .export-btn:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(82, 196, 26, 0.4);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
 }
 
 .export-btn:disabled {
@@ -513,7 +504,7 @@ watch(() => totalItems.value, (newTotal) => {
 .retry-btn {
   margin-top: 20px;
   padding: 12px 24px;
-  background: #1890ff;
+  background: #1e40af;
   color: white;
   border: none;
   border-radius: 8px;
@@ -524,7 +515,7 @@ watch(() => totalItems.value, (newTotal) => {
 }
 
 .retry-btn:hover {
-  background: #40a9ff;
+  background: #3b82f6;
 }
 
 .table-wrapper {
@@ -533,81 +524,100 @@ watch(() => totalItems.value, (newTotal) => {
   margin: 0 24px;
 }
 
-.indicators-table {
+.potential-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
-  min-width: 1200px;
+  min-width: 1400px;
 }
 
-.indicators-table th {
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+.potential-table th {
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
   padding: 16px 12px;
   text-align: center;
   font-weight: 600;
-  color: #2c3e50;
-  border-bottom: 3px solid #dee2e6;
+  color: #0c4a6e;
+  border-bottom: 3px solid #0284c7;
   position: sticky;
   top: 0;
   z-index: 10;
   white-space: nowrap;
 }
 
-.indicators-table th.sortable {
+.potential-table th.sortable {
   cursor: pointer;
   user-select: none;
   transition: background 0.2s;
 }
 
-.indicators-table th.sortable:hover {
-  background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+.potential-table th.sortable:hover {
+  background: linear-gradient(135deg, #bae6fd 0%, #7dd3fc 100%);
 }
 
 .sort-arrow {
   margin-left: 8px;
   font-size: 12px;
-  color: #1890ff;
+  color: #1e40af;
   font-weight: bold;
 }
 
-.indicators-table td {
+.potential-table td {
   padding: 12px;
   border-bottom: 1px solid #f0f0f0;
   text-align: center;
   white-space: nowrap;
 }
 
-.indicators-table tr:hover {
-  background: #f5f5f5;
+.potential-table tr:hover {
+  background: #f8fafc;
 }
 
 .name-column {
   font-weight: 600;
-  color: #2c3e50;
+  color: #1e293b;
   text-align: left !important;
   min-width: 180px;
 }
 
-.score-column {
-  font-weight: bold;
-  color: #e74c3c;
-  font-size: 15px;
+.potential-high {
+  color: #059669;
+  font-weight: 600;
+  background-color: #ecfdf5;
+  border-radius: 4px;
+  padding: 4px 8px;
 }
 
-.rate-column {
-  color: #27ae60;
+.potential-medium {
+  color: #d97706;
   font-weight: 500;
+  background-color: #fffbeb;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.potential-low {
+  color: #dc2626;
+  font-weight: 500;
+  background-color: #fef2f2;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.potential-column {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 12px;
 }
 
 .numeric-column {
-  color: #2c3e50;
+  color: #374151;
   font-family: 'Courier New', monospace;
 }
 
 .summary-section {
   padding: 20px 24px;
-  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-  border-top: 2px solid #dee2e6;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-top: 2px solid #0284c7;
 }
 
 .summary-cards {
@@ -623,6 +633,7 @@ watch(() => totalItems.value, (newTotal) => {
   text-align: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid #e2e8f0;
 }
 
 .summary-card:hover {
@@ -632,7 +643,7 @@ watch(() => totalItems.value, (newTotal) => {
 
 .card-title {
   font-size: 13px;
-  color: #666;
+  color: #64748b;
   margin-bottom: 8px;
   font-weight: 500;
 }
@@ -640,7 +651,7 @@ watch(() => totalItems.value, (newTotal) => {
 .card-value {
   font-size: 24px;
   font-weight: 700;
-  color: #2c3e50;
+  color: #0c4a6e;
 }
 
 .pagination {
@@ -674,8 +685,8 @@ watch(() => totalItems.value, (newTotal) => {
 }
 
 .pagination-btn:hover:not(:disabled) {
-  border-color: #1890ff;
-  color: #1890ff;
+  border-color: #1e40af;
+  color: #1e40af;
 }
 
 .pagination-btn:disabled {

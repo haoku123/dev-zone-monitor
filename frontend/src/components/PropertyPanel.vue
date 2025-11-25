@@ -33,6 +33,10 @@
             <span class="btn-icon">✏️</span>
             编辑数据
           </button>
+          <button class="action-btn table-btn" @click="$emit('showDataTable', title, properties)">
+            <span class="btn-icon">📋</span>
+            详细数据
+          </button>
         </div>
       </div>
     </div>
@@ -57,7 +61,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['close', 'showIndicators', 'showPotentials', 'showEditor'])
+defineEmits(['close', 'showIndicators', 'showPotentials', 'showEditor', 'showDataTable'])
 
 // 格式化属性键名
 const formatKey = (key) => {
@@ -271,6 +275,18 @@ const formatValue = (key, value) => {
   background-color: #ffe0b2;
   border-color: #f57c00;
   color: #e65100;
+}
+
+.table-btn {
+  background-color: #e8eaf6;
+  border-color: #3f51b5;
+  color: #303f9f;
+}
+
+.table-btn:hover {
+  background-color: #c5cae9;
+  border-color: #303f9f;
+  color: #1a237e;
 }
 
 .btn-icon {

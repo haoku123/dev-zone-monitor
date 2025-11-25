@@ -3,7 +3,7 @@
     <div class="panel-backdrop" @click="closePanel"></div>
     <div class="panel-content">
       <div class="panel-header">
-        <h3>{{ areaName }} - 评价指标</h3>
+        <h3>{{ areaName }} - 评价指标 ({{ getZoneTypeName() }})</h3>
         <button class="close-btn" @click="closePanel">×</button>
       </div>
 
@@ -28,11 +28,12 @@
               </div>
               <div class="score-description">
                 <p>{{ getScoreDescription(overallScore) }}</p>
+                <div class="zone-type-badge">{{ getZoneTypeName() }}</div>
               </div>
             </div>
           </div>
 
-          <!-- 详细指标 - 按照标准指标体系 -->
+          <!-- 详细指标 - 按照国家标准指标体系 -->
           <div class="detailed-indicators">
             <!-- 土地利用状况 (权重: 50%) -->
             <div class="indicator-section">
@@ -46,6 +47,11 @@
                   <span class="indicator-value">{{ formatPercent(indicators.landUtilizationStatus?.landDevelopmentLevel?.landDevelopmentRate?.value) }}</span>
                   <span class="indicator-formula">{{ indicators.landUtilizationStatus?.landDevelopmentLevel?.landDevelopmentRate?.formula }}</span>
                 </div>
+                <div class="indicator-item">
+                  <span class="indicator-name">土地供应率</span>
+                  <span class="indicator-value">{{ formatPercent(indicators.landUtilizationStatus?.landDevelopmentLevel?.landSupplyRate?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.landUtilizationStatus?.landDevelopmentLevel?.landSupplyRate?.formula }}</span>
+                </div>
               </div>
 
               <!-- 用地结构状况 (权重: 25%) -->
@@ -55,6 +61,11 @@
                   <span class="indicator-name">工业用地率</span>
                   <span class="indicator-value">{{ formatPercent(indicators.landUtilizationStatus?.landStructureStatus?.industrialLandRate?.value) }}</span>
                   <span class="indicator-formula">{{ indicators.landUtilizationStatus?.landStructureStatus?.industrialLandRate?.formula }}</span>
+                </div>
+                <div class="indicator-item">
+                  <span class="indicator-name">建筑密度</span>
+                  <span class="indicator-value">{{ formatPercent(indicators.landUtilizationStatus?.landStructureStatus?.buildingDensity?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.landUtilizationStatus?.landStructureStatus?.buildingDensity?.formula }}</span>
                 </div>
               </div>
 
@@ -73,9 +84,9 @@
                 </div>
                 <div class="indicator-item">
                   <span class="indicator-name">人均建设用地</span>
-                  <span class="indicator-value">{{ formatNumber(indicators.landUtilizationStatus?.landUseIntensity?.perCapitaConstructionLand?.value, 4) }}</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.landUtilizationStatus?.landUseIntensity?.perCapitaConstructionLand?.value, 1) }}</span>
                   <span class="indicator-formula">{{ indicators.landUtilizationStatus?.landUseIntensity?.perCapitaConstructionLand?.formula }}</span>
-                  <span class="indicator-unit">公顷/人</span>
+                  <span class="indicator-unit">m²/人</span>
                 </div>
               </div>
             </div>
@@ -86,15 +97,38 @@
               <div class="indicator-group">
                 <div class="indicator-item">
                   <span class="indicator-name">固定资产投资强度</span>
-                  <span class="indicator-value">{{ formatNumber(indicators.landUseBenefit?.outputBenefit?.fixedAssetInvestmentIntensity?.value) }}</span>
-                  <span class="indicator-formula">{{ indicators.landUseBenefit?.outputBenefit?.fixedAssetInvestmentIntensity?.formula }}</span>
-                  <span class="indicator-unit">亿元/公顷</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.economicBenefit?.outputBenefit?.fixedAssetInvestmentIntensity?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.economicBenefit?.outputBenefit?.fixedAssetInvestmentIntensity?.formula }}</span>
+                  <span class="indicator-unit">万元/公顷</span>
                 </div>
                 <div class="indicator-item">
                   <span class="indicator-name">工商企业密度</span>
-                  <span class="indicator-value">{{ formatNumber(indicators.landUseBenefit?.outputBenefit?.commercialEnterpriseDensity?.value) }}</span>
-                  <span class="indicator-formula">{{ indicators.landUseBenefit?.outputBenefit?.commercialEnterpriseDensity?.formula }}</span>
-                  <span class="indicator-unit">个/公顷</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.economicBenefit?.outputBenefit?.commercialEnterpriseDensity?.value, 1) }}</span>
+                  <span class="indicator-formula">{{ indicators.economicBenefit?.outputBenefit?.commercialEnterpriseDensity?.formula }}</span>
+                  <span class="indicator-unit">家/公顷</span>
+                </div>
+              </div>
+
+              <!-- 特色指标 - 根据开发区类型显示 -->
+              <h5 class="sub-section-title">特色指标</h5>
+              <div class="indicator-group special-indicators">
+                <div class="indicator-item" v-if="getZoneType() === 'economic'">
+                  <span class="indicator-name">地均GDP</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.specialIndicators?.gdpPerLand?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.specialIndicators?.gdpPerLand?.formula }}</span>
+                  <span class="indicator-unit">万元/公顷</span>
+                </div>
+                <div class="indicator-item" v-if="getZoneType() === 'highTech'">
+                  <span class="indicator-name">高新技术企业收入产出强度</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.specialIndicators?.highTechRevenueIntensity?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.specialIndicators?.highTechRevenueIntensity?.formula }}</span>
+                  <span class="indicator-unit">万元/公顷</span>
+                </div>
+                <div class="indicator-item" v-if="getZoneType() === 'bonded'">
+                  <span class="indicator-name">单位面积贸易额</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.specialIndicators?.tradeValuePerLand?.value) }}</span>
+                  <span class="indicator-formula">{{ indicators.specialIndicators?.tradeValuePerLand?.formula }}</span>
+                  <span class="indicator-unit">万元/公顷</span>
                 </div>
               </div>
             </div>
@@ -108,6 +142,12 @@
                   <span class="indicator-value">{{ formatPercent(indicators.managementPerformance?.landUseSupervisionPerformance?.landIdleRate?.value) }}</span>
                   <span class="indicator-formula">{{ indicators.managementPerformance?.landUseSupervisionPerformance?.landIdleRate?.formula }}</span>
                 </div>
+                <div class="indicator-item">
+                  <span class="indicator-name">闲置土地面积</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.managementPerformance?.landUseSupervisionPerformance?.idleLandArea?.value, 2) }}</span>
+                  <span class="indicator-formula">{{ indicators.managementPerformance?.landUseSupervisionPerformance?.idleLandArea?.formula }}</span>
+                  <span class="indicator-unit">公顷</span>
+                </div>
               </div>
             </div>
 
@@ -117,15 +157,21 @@
               <div class="indicator-group">
                 <div class="indicator-item">
                   <span class="indicator-name">地均税收</span>
-                  <span class="indicator-value">{{ formatNumber(indicators.socialBenefit?.socialBenefitIndicators?.taxPerLand?.value) }}</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.socialBenefit?.socialBenefitIndicators?.taxPerLand?.value, 1) }}</span>
                   <span class="indicator-formula">{{ indicators.socialBenefit?.socialBenefitIndicators?.taxPerLand?.formula }}</span>
-                  <span class="indicator-unit">亿元/公顷</span>
+                  <span class="indicator-unit">万元/公顷</span>
                 </div>
-                <div class="indicator-item">
+                <div class="indicator-item" v-if="getZoneType() === 'highTech'">
+                  <span class="indicator-name">亩均地税收</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.specialIndicators?.taxPerLand?.value, 1) }}</span>
+                  <span class="indicator-formula">{{ indicators.specialIndicators?.taxPerLand?.formula }}</span>
+                  <span class="indicator-unit">万元/亩</span>
+                </div>
+                <div class="indicator-item" v-if="getZoneType() === 'bonded'">
                   <span class="indicator-name">地均工业税收</span>
-                  <span class="indicator-value">{{ formatNumber(indicators.socialBenefit?.socialBenefitIndicators?.industrialTaxPerLand?.value) }}</span>
-                  <span class="indicator-formula">{{ indicators.socialBenefit?.socialBenefitIndicators?.industrialTaxPerLand?.formula }}</span>
-                  <span class="indicator-unit">亿元/公顷</span>
+                  <span class="indicator-value">{{ formatNumber(indicators.specialIndicators?.industrialTaxPerLand?.value, 1) }}</span>
+                  <span class="indicator-formula">{{ indicators.specialIndicators?.industrialTaxPerLand?.formula }}</span>
+                  <span class="indicator-unit">万元/公顷</span>
                 </div>
               </div>
             </div>
@@ -162,6 +208,28 @@ const loading = ref(false)
 const error = ref(null)
 const indicators = ref(null)
 
+// 确定开发区类型
+const getZoneType = () => {
+  if (!props.areaName) return 'other'
+  const nameStr = props.areaName.toLowerCase()
+
+  if (nameStr.includes('高新')) return 'highTech'
+  else if (nameStr.includes('保税')) return 'bonded'
+  else if (nameStr.includes('经济') || nameStr.includes('经开')) return 'economic'
+  else return 'other'
+}
+
+// 获取开发区类型名称
+const getZoneTypeName = () => {
+  const typeMap = {
+    highTech: '高新区',
+    bonded: '综合保税区',
+    economic: '经开区',
+    other: '其他开发区'
+  }
+  return typeMap[getZoneType()] || '其他开发区'
+}
+
 // 计算综合得分
 const overallScore = computed(() => {
   if (!indicators.value) return 0
@@ -169,7 +237,7 @@ const overallScore = computed(() => {
   // 标准指标体系权重分配
   const weights = {
     landUtilizationStatus: 0.50,    // 土地利用状况
-    landUseBenefit: 0.20,          // 用地效益
+    economicBenefit: 0.20,          // 用地效益
     managementPerformance: 0.15,   // 管理绩效
     socialBenefit: 0.15            // 社会效益
   }
@@ -208,7 +276,7 @@ const overallScore = computed(() => {
   // 计算各维度得分
   const scores = {
     landUtilizationStatus: calculateDimensionScore('landUtilizationStatus'),
-    landUseBenefit: calculateDimensionScore('landUseBenefit'),
+    economicBenefit: calculateDimensionScore('economicBenefit'),
     managementPerformance: calculateDimensionScore('managementPerformance'),
     socialBenefit: calculateDimensionScore('socialBenefit')
   }
@@ -216,7 +284,7 @@ const overallScore = computed(() => {
   // 计算加权总分
   const weightedScore =
     scores.landUtilizationStatus * weights.landUtilizationStatus +
-    scores.landUseBenefit * weights.landUseBenefit +
+    scores.economicBenefit * weights.economicBenefit +
     scores.managementPerformance * weights.managementPerformance +
     scores.socialBenefit * weights.socialBenefit
 
@@ -310,8 +378,8 @@ watch(() => props.visible, (visible) => {
   background: white;
   border-radius: 8px;
   width: 90%;
-  max-width: 800px;
-  max-height: 80vh;
+  max-width: 900px;
+  max-height: 85vh;
   overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
@@ -428,10 +496,24 @@ watch(() => props.visible, (visible) => {
   opacity: 0.9;
 }
 
+.score-description {
+  flex: 1;
+}
+
 .score-description p {
-  margin: 0;
+  margin: 0 0 12px 0;
   color: #1e40af;
   font-size: 14px;
+}
+
+.zone-type-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  background-color: #dbeafe;
+  color: #1e40af;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .detailed-indicators {
@@ -439,7 +521,7 @@ watch(() => props.visible, (visible) => {
 }
 
 .indicator-section {
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
 .indicator-section h4 {
@@ -465,9 +547,14 @@ watch(() => props.visible, (visible) => {
   gap: 12px;
 }
 
+.indicator-group.special-indicators .indicator-item {
+  border-left: 4px solid #10b981;
+  background-color: #ecfdf5;
+}
+
 .indicator-item {
   display: grid;
-  grid-template-columns: 200px 120px 1fr;
+  grid-template-columns: 240px 120px 1fr;
   align-items: center;
   gap: 16px;
   padding: 12px 16px;

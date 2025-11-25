@@ -7,7 +7,9 @@
       "Bash(docker run --name dev-zone-postgis -e POSTGRES_DB=dev_zone_db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 -d postgis/postgis:15-3.3)",
       "Bash(psql --version)",
       "Bash(curl -s http://localhost:8080/api/db/status)",
-      "Bash(python -m json.tool)"
+      "Bash(python -m json.tool)",
+      "Bash(npm start)",
+      "Bash(xargs cat)"
     ],
     "deny": [],
     "ask": []

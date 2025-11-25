@@ -13,8 +13,9 @@
         <div class="dropdown">
           <button class="dropdown-btn">数据表格</button>
           <div class="dropdown-content">
-            <a href="#" @click.prevent="$emit('showAttributeTable')">属性数据表</a>
-            <a href="#">表格2</a>
+            <a href="#" @click.prevent="$emit('showIndicatorsTable')">开发区指标汇总</a>
+            <a href="#" @click.prevent="$emit('showPotentialTable')">开发区潜力汇总</a>
+            <a href="#">其他数据表格</a>
           </div>
         </div>
       </div>
@@ -25,7 +26,7 @@
         <div class="dropdown">
           <button class="dropdown-btn">数据分析</button>
           <div class="dropdown-content">
-            <a href="#" @click.prevent="$emit('showChart')">用地潜力展示</a>
+            <a href="#" @click.prevent="$emit('showRanking')">开发区排名</a>
           </div>
         </div>
         <div class="dropdown">

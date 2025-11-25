@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS development_zones (
     city VARCHAR(100),                                       -- 城市
     district VARCHAR(100),                                   -- 区县
     level VARCHAR(50),                                       -- 级别（国家级、省级等）
+    zone_type VARCHAR(50),                                   -- 开发区类型（经济开发区、高新技术产业开发区、综合保税区、其他开发区）
     high_tech_enterprises INTEGER DEFAULT 0,                -- 高新企业数量
     status VARCHAR(20) DEFAULT 'active',                     -- 状态（active/inactive/deleted）
     source VARCHAR(50) DEFAULT 'manual',                     -- 数据来源

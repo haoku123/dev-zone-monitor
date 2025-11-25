@@ -7,8 +7,8 @@ const fs = require('fs');
  */
 class ProjectionDetector {
   constructor() {
-    this.initializeChineseEPSGCodes();
     this.epsgCache = new Map();
+    this.initializeChineseEPSGCodes();
   }
 
   /**

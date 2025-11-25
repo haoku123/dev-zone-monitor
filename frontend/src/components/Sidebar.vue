@@ -24,7 +24,7 @@
         <input
           ref="fileInputRef"
           type="file"
-          accept=".geojson,.shp,.shx,.dbf,.prj"
+          accept=".geojson,.shp,.shx,.dbf,.prj,.cpg,.sbn,.sbx,.qpj"
           @change="handleUpload"
           class="upload-input"
           multiple
@@ -161,10 +161,232 @@ const filteredList = computed(() => {
   })
 })
 
+// 严格的GeoJSON格式验证
+const validateGeoJSONContent = async (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = (e) => {
+      try {
+        const content = e.target.result
+        const geoJSON = JSON.parse(content)
+
+        // 验证基本结构
+        if (!geoJSON || typeof geoJSON !== 'object') {
+          throw new Error('GeoJSON必须是一个有效的JSON对象')
+        }
+
+        if (!geoJSON.type) {
+          throw new Error('GeoJSON缺少type字段')
+        }
+
+        const validTypes = ['FeatureCollection', 'Feature', 'Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection']
+        if (!validTypes.includes(geoJSON.type)) {
+          throw new Error(`无效的GeoJSON类型: ${geoJSON.type}。支持的类型: ${validTypes.join(', ')}`)
+        }
+
+        // 验证FeatureCollection
+        if (geoJSON.type === 'FeatureCollection') {
+          if (!Array.isArray(geoJSON.features)) {
+            throw new Error('FeatureCollection必须包含features数组')
+          }
+
+          if (geoJSON.features.length === 0) {
+            throw new Error('FeatureCollection不能为空')
+          }
+
+          // 验证每个feature
+          geoJSON.features.forEach((feature, index) => {
+            if (!feature || feature.type !== 'Feature') {
+              throw new Error(`第${index + 1}个要素不是有效的Feature`)
+            }
+
+            if (!feature.geometry) {
+              throw new Error(`第${index + 1}个要素缺少geometry字段`)
+            }
+
+            if (!feature.properties) {
+              throw new Error(`第${index + 1}个要素缺少properties字段`)
+            }
+
+            // 验证几何类型
+            if (feature.geometry.type) {
+              const geometryTypes = ['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon', 'GeometryCollection']
+              if (!geometryTypes.includes(feature.geometry.type)) {
+                throw new Error(`第${index + 1}个要素的几何类型无效: ${feature.geometry.type}`)
+              }
+            }
+
+            // 验证坐标
+            if (feature.geometry.coordinates) {
+              validateCoordinates(feature.geometry.coordinates, feature.geometry.type, index + 1)
+            }
+          })
+        }
+
+        // 验证单个Feature
+        else if (geoJSON.type === 'Feature') {
+          if (!geoJSON.geometry) {
+            throw new Error('Feature必须包含geometry字段')
+          }
+
+          if (!geoJSON.properties) {
+            throw new Error('Feature必须包含properties字段')
+          }
+
+          if (geoJSON.geometry.coordinates) {
+            validateCoordinates(geoJSON.geometry.coordinates, geoJSON.geometry.type, 1)
+          }
+        }
+
+        // 验证几何对象
+        else if (['Point', 'LineString', 'Polygon', 'MultiPoint', 'MultiLineString', 'MultiPolygon'].includes(geoJSON.type)) {
+          if (!geoJSON.coordinates) {
+            throw new Error(`${geoJSON.type}必须包含coordinates字段`)
+          }
+          validateCoordinates(geoJSON.coordinates, geoJSON.type, 1)
+        }
+
+        // 验证GeometryCollection
+        else if (geoJSON.type === 'GeometryCollection') {
+          if (!Array.isArray(geoJSON.geometries)) {
+            throw new Error('GeometryCollection必须包含geometries数组')
+          }
+
+          if (geoJSON.geometries.length === 0) {
+            throw new Error('GeometryCollection不能为空')
+          }
+        }
+
+        // 验证CRS信息
+        if (geoJSON.crs) {
+          if (geoJSON.crs.type !== 'name' && geoJSON.crs.type !== 'link') {
+            throw new Error('CRS的type必须是"name"或"link"')
+          }
+
+          if (!geoJSON.crs.properties) {
+            throw new Error('CRS必须包含properties字段')
+          }
+        }
+
+        console.log(`✅ GeoJSON文件 ${file.name} 验证通过`)
+        resolve(geoJSON)
+
+      } catch (error) {
+        console.error(`❌ GeoJSON文件 ${file.name} 验证失败:`, error.message)
+        reject(new Error(`GeoJSON格式验证失败 (${file.name}): ${error.message}`))
+      }
+    }
+
+    reader.onerror = () => {
+      reject(new Error(`无法读取GeoJSON文件: ${file.name}`))
+    }
+
+    reader.readAsText(file)
+  })
+}
+
+// 验证坐标格式
+const validateCoordinates = (coords, type, featureIndex) => {
+  const validateCoordinate = (coord, path = '') => {
+    if (!Array.isArray(coord) || coord.length < 2) {
+      throw new Error(`第${featureIndex}个要素${path}: 坐标必须是至少包含2个数字的数组 [x, y]`)
+    }
+
+    if (typeof coord[0] !== 'number' || typeof coord[1] !== 'number') {
+      throw new Error(`第${featureIndex}个要素${path}: 坐标值必须是数字`)
+    }
+
+    if (isNaN(coord[0]) || isNaN(coord[1])) {
+      throw new Error(`第${featureIndex}个要素${path}: 坐标值不能是NaN`)
+    }
+
+    // 基本坐标范围检查（WGS84）
+    if (coord[0] < -180 || coord[0] > 180) {
+      console.warn(`第${featureIndex}个要素${path}: 经度值超出WGS84范围 [-180, 180]: ${coord[0]}`)
+    }
+
+    if (coord[1] < -90 || coord[1] > 90) {
+      console.warn(`第${featureIndex}个要素${path}: 纬度值超出WGS84范围 [-90, 90]: ${coord[1]}`)
+    }
+  }
+
+  try {
+    switch (type) {
+      case 'Point':
+        validateCoordinate(coords)
+        break
+
+      case 'LineString':
+        if (!Array.isArray(coords) || coords.length < 2) {
+          throw new Error('LineString至少需要2个坐标点')
+        }
+        coords.forEach((coord, i) => validateCoordinate(coord, `[${i}]`))
+        break
+
+      case 'Polygon':
+        if (!Array.isArray(coords) || coords.length === 0) {
+          throw new Error('Polygon至少需要1个环')
+        }
+        coords.forEach((ring, i) => {
+          if (!Array.isArray(ring) || ring.length < 4) {
+            throw new Error(`Polygon的第${i}个环至少需要4个坐标点`)
+          }
+          // 检查环是否闭合
+          const first = ring[0]
+          const last = ring[ring.length - 1]
+          if (first[0] !== last[0] || first[1] !== last[1]) {
+            throw new Error(`Polygon的第${i}个环必须闭合`)
+          }
+          ring.forEach((coord, j) => validateCoordinate(coord, `[${i}][${j}]`))
+        })
+        break
+
+      case 'MultiPoint':
+        if (!Array.isArray(coords) || coords.length === 0) {
+          throw new Error('MultiPoint至少需要1个坐标点')
+        }
+        coords.forEach((coord, i) => validateCoordinate(coord, `[${i}]`))
+        break
+
+      case 'MultiLineString':
+        if (!Array.isArray(coords) || coords.length === 0) {
+          throw new Error('MultiLineString至少需要1条线')
+        }
+        coords.forEach((line, i) => {
+          if (!Array.isArray(line) || line.length < 2) {
+            throw new Error(`MultiLineString的第${i}条线至少需要2个坐标点`)
+          }
+          line.forEach((coord, j) => validateCoordinate(coord, `[${i}][${j}]`))
+        })
+        break
+
+      case 'MultiPolygon':
+        if (!Array.isArray(coords) || coords.length === 0) {
+          throw new Error('MultiPolygon至少需要1个多边形')
+        }
+        coords.forEach((polygon, i) => {
+          if (!Array.isArray(polygon) || polygon.length === 0) {
+            throw new Error(`MultiPolygon的第${i}个多边形至少需要1个环`)
+          }
+          polygon.forEach((ring, j) => {
+            if (!Array.isArray(ring) || ring.length < 4) {
+              throw new Error(`MultiPolygon第${i}个多边形的第${j}个环至少需要4个坐标点`)
+            }
+            ring.forEach((coord, k) => validateCoordinate(coord, `[${i}][${j}][${k}]`))
+          })
+        })
+        break
+    }
+  } catch (error) {
+    throw new Error(`坐标验证失败: ${error.message}`)
+  }
+}
+
 // 文件格式验证和类型识别
-const validateFiles = (files) => {
+const validateFiles = async (files) => {
   const fileArray = Array.from(files)
-  const validExtensions = ['.geojson', '.shp', '.shx', '.dbf', '.prj']
+  const validExtensions = ['.geojson', '.shp', '.shx', '.dbf', '.prj', '.cpg', '.sbn', '.sbx', '.qpj']
 
   const invalidFiles = fileArray.filter(file => {
     const ext = '.' + file.name.split('.').pop().toLowerCase()
@@ -173,7 +395,7 @@ const validateFiles = (files) => {
 
   if (invalidFiles.length > 0) {
     const invalidNames = invalidFiles.map(f => f.name).join(', ')
-    throw new Error(`不支持的文件格式: ${invalidNames}\\n支持的格式: GeoJSON (.geojson), Shapefile (.shp, .shx, .dbf, .prj)`)
+    throw new Error(`不支持的文件格式: ${invalidNames}\\n支持的格式: GeoJSON (.geojson), Shapefile (.shp, .shx, .dbf, .prj, .cpg, .sbn, .sbx, .qpj)`)
   }
 
   // 识别文件类型
@@ -183,10 +405,20 @@ const validateFiles = (files) => {
   const dbfFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.dbf'))
   const prjFiles = fileArray.filter(f => f.name.toLowerCase().endsWith('.prj'))
 
-  // 如果是GeoJSON文件，直接通过
+  // 如果是GeoJSON文件，进行严格验证
   if (geojsonFiles.length > 0 && shpFiles.length === 0) {
-    console.log('✅ 检测到GeoJSON文件')
-    return fileArray
+    console.log('✅ 检测到GeoJSON文件，开始严格验证...')
+
+    // 同步验证所有GeoJSON文件
+    const validationPromises = geojsonFiles.map(file => validateGeoJSONContent(file))
+    try {
+      await Promise.all(validationPromises)
+      console.log('🎉 所有GeoJSON文件验证通过')
+      return fileArray
+    } catch (error) {
+      // 如果任何一个GeoJSON文件验证失败，抛出错误阻止上传
+      throw error
+    }
   }
 
   // 如果是Shapefile文件，进行完整性检查
@@ -230,11 +462,11 @@ const validateFiles = (files) => {
 
 // 处理文件上传
 const handleUpload = async (event) => {
-  const files = event.target.files || event.dataTransfer.files
+  const files = event.target?.files || event.dataTransfer?.files
 
   if (files && files.length > 0) {
     try {
-      const validatedFiles = validateFiles(files)
+      const validatedFiles = await validateFiles(files)
       await uploadFiles(validatedFiles)
     } catch (error) {
       alert(error.message)
@@ -242,7 +474,7 @@ const handleUpload = async (event) => {
   }
 
   // 清空文件输入
-  if (event.target.value !== undefined) {
+  if (event.target?.value !== undefined) {
     event.target.value = ''
   }
 }
@@ -363,7 +595,7 @@ const handleDrop = (event) => {
   isDragOver.value = false
   const files = event.dataTransfer.files
   if (files && files.length > 0) {
-    handleUpload({ dataTransfer: event.dataTransfer })
+    handleUpload(event)
   }
 }
 
