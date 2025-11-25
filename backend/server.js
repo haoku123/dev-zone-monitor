@@ -2348,131 +2348,219 @@ function getIndicatorWeightsByType(zoneType) {
   return weightsMap[zoneType] || weightsMap.other;
 }
 
-// 计算开发区评价指标 - 根据不同开发区类型使用不同的指标体系
+// 特色指标计算函数 - 全局定义，供其他函数调用
+
+// 获取特色指标1：按照国家标准文档实现
+function getSpecificIndicator1(zoneType, landData, economicData, enterpriseData, highTechData, bondedData) {
+  const builtUrbanConstructionLand = safeGet(landData, 'builtUrbanConstructionLand');
+
+  switch (zoneType) {
+    case 'economic':
+      // 经开区特色：地均GDP
+      return {
+        gdpPerLand: {
+          value: safeDivide(safeGet(economicData, 'regionalGDP'), builtUrbanConstructionLand),
+          formula: "地区生产总值(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        }
+      };
+
+    case 'highTech':
+      // 高新区特色：工商企业密度
+      const totalEnterprises = safeGet(enterpriseData, 'totalEnterprises') + safeGet(highTechData, 'highTechEnterprises', 0);
+      return {
+        businessEnterpriseDensity: {
+          value: safeDivide(totalEnterprises, builtUrbanConstructionLand),
+          formula: "(工商企业总数+高新技术企业数)/已建成城镇建设用地面积",
+          unit: "家/公顷"
+        }
+      };
+
+    case 'bonded':
+      // 综合保税区特色：单位面积贸易额
+      return {
+        tradeValuePerLand: {
+          value: safeDivide(safeGet(bondedData, 'totalTradeValue'), builtUrbanConstructionLand),
+          formula: "进出口贸易总额(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        }
+      };
+
+    default:
+      // 其他开发区：单位面积企业收入
+      return {
+        enterpriseIncomePerLand: {
+          value: safeDivide(safeGet(economicData, 'totalEnterpriseIncome'), builtUrbanConstructionLand),
+          formula: "企业总收入(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        }
+      };
+  }
+}
+
+// 获取特色指标2：按照国家标准文档实现
+function getSpecificIndicator2(zoneType, landData, economicData, populationData, highTechData, bondedData) {
+  const builtUrbanConstructionLand = safeGet(landData, 'builtUrbanConstructionLand');
+
+  switch (zoneType) {
+    case 'economic':
+      // 经开区特色：产业用地投入产出效益
+      return {
+        industrialInputOutputRatio: {
+          value: safeDivide(safeGet(economicData, 'industrialOutput'), safeGet(economicData, 'industrialInvestment')),
+          formula: "产业用地总产值/产业用地总投资",
+          unit: "万元/万元"
+        }
+      };
+
+    case 'highTech':
+      // 高新区特色：亩均地税收
+      const landInMu = builtUrbanConstructionLand * 15; // 公顷转换为亩
+      return {
+        taxPerLand: {
+          value: safeDivide(safeGet(economicData, 'totalTax'), landInMu),
+          formula: "税收总额(万元)/已建成城镇建设用地面积(亩)",
+          unit: "万元/亩"
+        }
+      };
+
+    case 'bonded':
+      // 综合保税区特色：固定资产投资占比
+      const totalFixedAssets = safeGet(bondedData, 'fixedAssetInvestment') + safeGet(economicData, 'fixedAssetInvestment', 0);
+      return {
+        fixedAssetInvestmentRatio: {
+          value: safeDivide(totalFixedAssets, safeGet(bondedData, 'totalInvestment')) * 100,
+          formula: "固定资产投资总额/总投资额 × 100%",
+          unit: "%"
+        }
+      };
+
+    default:
+      // 其他开发区：单位面积产值
+      return {
+        outputPerLand: {
+          value: safeDivide(safeGet(economicData, 'totalOutput'), builtUrbanConstructionLand),
+          formula: "总产值(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        }
+      };
+  }
+}
+
+
+// 按照前端期望的结构计算指标
 async function calculateZoneIndicators(areaName) {
   const zoneData = await loadZoneData(areaName);
-  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises, enterpriseData } = zoneData;
+  const { landData, economicData, buildingData, buildingBaseData, populationData, highTechEnterprises } = zoneData;
 
-  // 确定开发区类型和对应的指标体系
-  const zoneType = determineZoneType(areaName);
-  const indicatorWeights = getIndicatorWeightsByType(zoneType);
+  // 确保enterpriseData存在，如果不存在则使用空对象
+  const enterpriseData = zoneData.enterpriseData || {
+    totalEnterprises: 0,
+    industrialEnterprises: 0,
+    serviceEnterprises: 0
+  };
 
-  // 计算各项指标
+  // 按照前端期望的结构组织数据
   const indicators = {
-    areaName,
-
-    // 基础土地信息
-    basicLandInfo: {
-      totalLandArea: {
-        value: safeGet(landData, 'totalLandArea'),
-        unit: 'ha'
-      },
-      suppliedStateConstructionLand: {
-        value: safeGet(landData, 'suppliedStateConstructionLand'),
-        unit: 'ha'
-      },
-      nonConstructionArea: {
-        value: safeGet(landData, 'nonConstructionArea'),
-        unit: 'ha'
-      }
-    },
-
-    // 土地利用状况
+    areaName: areaName,
+    lastUpdated: new Date().toISOString(),
     landUtilizationStatus: {
-      weight: indicatorWeights.landUtilizationWeight,
-
-      // 土地开发程度
+      weight: 0.5,
       landDevelopmentLevel: {
-        weight: indicatorWeights.landDevelopmentWeight,
+        weight: 0.2,
         landDevelopmentRate: {
-          value: safeDivide(safeGet(landData, 'availableSupplyArea'), safeGet(landData, 'totalLandArea')),
+          value: safeDivide(safeGet(landData, 'availableSupplyArea', null), safeGet(landData, 'totalLandArea', null), null),
           formula: "已达到供地面积/土地总面积",
           unit: "ratio"
         },
-        builtUpUrbanConstructionLand: {
-          value: safeGet(landData, 'builtUrbanConstructionLand'),
-          unit: 'ha'
+        landSupplyRate: {
+          value: safeDivide(safeGet(landData, 'suppliedStateConstructionLand', null), safeGet(landData, 'planningConstructionLand', null), null),
+          formula: "已供应国有建设用地/规划建设用地",
+          unit: "ratio"
         }
       },
-
-      // 用地结构状况
       landStructureStatus: {
-        weight: indicatorWeights.landStructureWeight,
+        weight: 0.25,
         industrialLandRate: {
-          value: safeDivide(safeGet(landData, 'industrialStorageLand'), safeGet(landData, 'builtUrbanConstructionLand')),
-          formula: "工矿仓储用地面积/已建成城镇建设用地",
+          value: safeDivide(safeGet(landData, 'industrialStorageLand', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "工矿仓储用地面积/已建成城镇建设用地面积",
           unit: "ratio"
         },
-        industrialStorageLand: {
-          value: safeGet(landData, 'industrialStorageLand'),
-          unit: 'ha'
+        buildingDensity: {
+          value: safeDivide(safeGet(buildingBaseData, 'buildingBaseArea', null), safeGet(landData, 'builtUrbanConstructionLand', null), null) * 100,
+          formula: "建筑基底面积/已建成城镇建设用地面积 × 100%",
+          unit: "%"
         }
       },
-
-      // 土地利用强度
       landUseIntensity: {
-        weight: indicatorWeights.landIntensityWeight,
+        weight: 0.55,
         comprehensivePlotRatio: {
-          value: safeDivide(safeGet(buildingData, 'totalBuildingArea'), safeGet(landData, 'builtUrbanConstructionLand')),
-          formula: "总建筑面积/已建成城镇建设用地",
+          value: safeDivide(safeGet(buildingData, 'totalBuildingArea', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "总建筑面积/已建成城镇建设用地面积",
           unit: "ratio"
         },
-        industrialStorageBuildingArea: {
-          value: safeGet(buildingData, 'industrialStorageBuildingArea'),
-          unit: 'm²'
+        industrialPlotRatio: {
+          value: safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea', null), safeGet(landData, 'industrialStorageLand', null), null),
+          formula: "工矿仓储建筑面积/工矿仓储用地面积",
+          unit: "ratio"
+        },
+        perCapitaConstructionLand: {
+          value: safeDivide(safeGet(landData, 'builtUrbanConstructionLand', null) * 10000, safeGet(populationData, 'residentPopulation', null), null),
+          formula: "已建成城镇建设用地面积(m²)/常住人口",
+          unit: "m²/人"
         }
       }
     },
-
-    // 用地效益
     economicBenefit: {
-      weight: indicatorWeights.economicBenefitWeight,
+      weight: 0.2,
       outputBenefit: {
-        weight: 1.0,
+        weight: 1,
         fixedAssetInvestmentIntensity: {
-          value: safeDivide(safeGet(economicData, 'totalFixedAssets'), safeGet(landData, 'builtUrbanConstructionLand')),
-          formula: "固定资产总额(万元)/已建成城镇建设用地",
-          unit: "万元/ha"
+          value: safeDivide(safeGet(economicData, 'totalFixedAssets', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "固定资产总额(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
         },
-        // 特色指标1：经开区 - 地均企业收入，高新区 - 工商企业密度，保税区 - 固定资产投资强度
-        ...getSpecificIndicator1(zoneType, landData, economicData, enterpriseData, highTechEnterprises)
+        enterpriseIncomePerLand: {
+          value: safeDivide(safeGet(economicData, 'totalEnterpriseRevenue', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "企业总收入(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        },
+        commercialEnterpriseDensity: {
+          value: safeDivide(safeGet(enterpriseData, 'totalEnterprises', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "企业总数/已建成城镇建设用地面积",
+          unit: "家/公顷"
+        }
       }
     },
-
-    // 管理绩效
     managementPerformance: {
-      weight: indicatorWeights.managementWeight,
+      weight: 0.15,
       landUseSupervisionPerformance: {
-        weight: 1.0,
+        weight: 1,
         landIdleRate: {
-          value: safeDivide(safeGet(landData, 'idleLandArea'), safeGet(landData, 'builtUrbanConstructionLand')),
-          formula: "闲置土地面积/已建成城镇建设用地",
+          value: safeDivide(safeGet(landData, 'idleLand', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "闲置土地面积/已建成城镇建设用地面积",
           unit: "ratio"
         },
         idleLandArea: {
-          value: safeGet(landData, 'idleLandArea'),
-          unit: 'ha'
+          value: safeGet(landData, 'idleLand', null),
+          formula: "闲置土地面积",
+          unit: "公顷"
         }
       }
     },
-
-    // 社会效益
     socialBenefit: {
-      weight: indicatorWeights.socialBenefitWeight,
+      weight: 0.15,
       socialBenefitIndicators: {
-        weight: 1.0,
+        weight: 1,
         taxPerLand: {
-          value: safeDivide(safeGet(economicData, 'totalTax'), safeGet(landData, 'builtUrbanConstructionLand')),
-          formula: "税收总额(万元)/已建成城镇建设用地",
-          unit: "万元/ha"
-        },
-        // 特色指标2：经开区 - 人均建设用地，高新区 - 地均税收，保税区 - 地均工业税收
-        ...getSpecificIndicator2(zoneType, landData, economicData, populationData)
+          value: safeDivide(safeGet(economicData, 'totalTax', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "税收总额(万元)/已建成城镇建设用地面积",
+          unit: "万元/公顷"
+        }
       }
     }
   };
 
-  indicators.lastUpdated = new Date().toISOString();
   return indicators;
 }
 
@@ -2485,21 +2573,21 @@ async function calculateZonePotentials(areaName) {
   const potentials = {
     areaName,
 
-    // 扩展潜力
+    // 扩展潜力 QE = QZ - QD - QF
     expansionPotential: {
-      value: Math.max(0, landData.totalLandArea - landData.suppliedStateConstructionLand - landData.nonConstructionArea),
+      value: Math.max(0, (safeGet(landData, 'totalLandArea', 0) - safeGet(landData, 'suppliedStateConstructionLand', 0) - safeGet(landData, 'nonConstructionArea', 0))),
       unit: "hectare",
-      formula: "规划建设用地面积 - 已建成城镇建设用地面积 - 非建设用地面积",
-      description: "开发区可扩展的土地面积"
+      formula: "QE = QZ - QD - QF (土地总面积 - 已供应国有建设用地面积 - 不可建设用地面积)",
+      description: "开发区内尚未供应且具备建设条件的土地面积"
     },
 
-    // 结构潜力
-    structuralPotentialRate: {
-      // 已建成城镇建设用地面积*（工业用地率理想值-工矿仓储用地面积/已建成城镇建设用地)
-      value: (safeGet(landData, 'builtUrbanConstructionLand') || 0) * (0.6 - safeDivide(safeGet(landData, 'industrialStorageLand'), safeGet(landData, 'builtUrbanConstructionLand'))),
+    // 结构潜力 QSP = QA × (PI - PP)
+    structuralPotential: {
+      // 已建成城镇建设用地面积*（工业用地率理想值-工业用地率现状值）
+      value: Math.max(0, (safeGet(landData, 'builtUrbanConstructionLand', 0) * (0.6 - safeDivide(safeGet(landData, 'industrialStorageLand', 0), safeGet(landData, 'builtUrbanConstructionLand', 1), 0)))),
       unit: "hectare",
-      formula: "已建成城镇建设用地面积*（工业用地率理想值0.6-工矿仓储用地面积/已建成城镇建设用地）",
-      description: "开发区可增加的工矿仓储用地面积"
+      formula: "QSP = QA × (PI - PP) (已建成城镇建设用地面积 × (工业用地率理想值0.6 - 工业用地率现状值))",
+      description: "通过用地结构调整可增加的工矿仓储用地面积"
     },
 
     structurePotential: {
@@ -2522,26 +2610,40 @@ async function calculateZonePotentials(areaName) {
 
     // 强度潜力
     intensityPotential: {
-      // 工矿仓储用地面积*（工业用地综合容积率理想值-工矿仓储建筑面积/工矿仓储用地面积）/工业用地综合容积率理想值
-      value: (safeGet(landData, 'industrialStorageLand') || 0) * (1.5 - safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea'), safeGet(landData, 'industrialStorageLand'))) / 1.5,
+      // 工业建筑开发强度
+      industrialBuildingIntensity: {
+        value: safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea', 0), safeGet(landData, 'industrialStorageLand', 1), 0),
+        unit: "ratio",
+        formula: "工业建筑开发强度 = 工矿仓储建筑面积 / 工矿仓储用地面积",
+        description: "现状工业用地综合容积率"
+      },
+      // 土地利用缺口
+      landUtilizationGap: {
+        value: Math.max(0, (1.5 - safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea', 0), safeGet(landData, 'industrialStorageLand', 1), 0))),
+        unit: "ratio",
+        formula: "土地利用缺口 = 工业用地综合容积率理想值1.5 - 工业用地综合容积率现状值",
+        description: "当前开发强度与理想强度的差距"
+      },
+      // 强度潜力值 QIP = QA2 × (II - IP)
+      value: Math.max(0, (safeGet(landData, 'industrialStorageLand', 0) * (1.5 - safeDivide(safeGet(buildingData, 'industrialStorageBuildingArea', 0), safeGet(landData, 'industrialStorageLand', 1), 0)))),
       unit: "hectare",
-      formula: "工矿仓储用地面积*（工业用地综合容积率理想值1.5-工矿仓储建筑面积/工矿仓储用地面积）/工业用地综合容积率理想值",
-      description: "可扩展的工业用地面积"
+      formula: "QIP = QA2 × (II - IP) (工矿仓储用地面积 × (工业用地综合容积率理想值1.5 - 工业用地综合容积率现状值))",
+      description: "通过提升现状工业用地综合容积率的方式能够扩展的工业用地面积"
     },
 
-    // 管理潜力
+    // 管理潜力 = 闲置土地面积
     managementPotential: {
       idleLandArea: {
-        value: safeGet(landData, 'idleLandArea'),
+        value: safeGet(landData, 'idleLand'),
         unit: "hectare",
         formula: "闲置土地面积",
-        description: "可通过管理优化的闲置土地面积"
+        description: "通过对闲置、低效利用的土地进行清理和再开发所能释放的用地空间"
       },
 
       idleLandRatio: {
-        value: safeDivide(safeGet(landData, 'idleLandArea'), safeGet(landData, 'builtUrbanConstructionLand')),
+        value: safeDivide(safeGet(landData, 'idleLand'), safeGet(landData, 'builtUrbanConstructionLand')),
         unit: "ratio",
-        formula: "闲置土地面积 / 已建成面积",
+        formula: "闲置土地面积 / 已建成城镇建设用地面积",
         description: "闲置土地比例(越小越好)"
       }
     },
@@ -3325,104 +3427,6 @@ async function initializeServer() {
 
         const indexContent = fs.readFileSync(indexPath, 'utf-8');
         let zones = JSON.parse(indexContent);
-
-  
-        // 获取特色指标1：按照国家标准文档实现
-        function getSpecificIndicator1(zoneType, landData, economicData, enterpriseData, highTechData, bondedData) {
-          const builtUrbanConstructionLand = safeGet(landData, 'builtUrbanConstructionLand');
-
-          switch (zoneType) {
-            case 'economic':
-              // 经开区特色：地均GDP
-              return {
-                gdpPerLand: {
-                  value: safeDivide(safeGet(economicData, 'regionalGDP'), builtUrbanConstructionLand),
-                  formula: "地区生产总值(万元)/已建成城镇建设用地面积",
-                  unit: "万元/公顷"
-                }
-              };
-
-            case 'highTech':
-              // 高新区特色：工商企业密度
-              const totalEnterprises = safeGet(enterpriseData, 'totalEnterprises') + safeGet(highTechData, 'highTechEnterprises', 0);
-              return {
-                businessEnterpriseDensity: {
-                  value: safeDivide(totalEnterprises, builtUrbanConstructionLand),
-                  formula: "(工商企业总数+高新技术企业数)/已建成城镇建设用地面积",
-                  unit: "家/公顷"
-                }
-              };
-
-            case 'bonded':
-              // 综合保税区特色：单位面积贸易额
-              return {
-                tradeValuePerLand: {
-                  value: safeDivide(safeGet(bondedData, 'totalTradeValue'), builtUrbanConstructionLand),
-                  formula: "进出口贸易总额(万元)/已建成城镇建设用地面积",
-                  unit: "万元/公顷"
-                }
-              };
-
-            default:
-              // 其他开发区：单位面积企业收入
-              return {
-                enterpriseIncomePerLand: {
-                  value: safeDivide(safeGet(economicData, 'totalEnterpriseIncome'), builtUrbanConstructionLand),
-                  formula: "企业总收入(万元)/已建成城镇建设用地面积",
-                  unit: "万元/公顷"
-                }
-              };
-          }
-        }
-
-        // 获取特色指标2：按照国家标准文档实现
-        function getSpecificIndicator2(zoneType, landData, economicData, populationData, highTechData, bondedData) {
-          const builtUrbanConstructionLand = safeGet(landData, 'builtUrbanConstructionLand');
-
-          switch (zoneType) {
-            case 'economic':
-              // 经开区特色：产业用地投入产出效益
-              return {
-                industrialInputOutputRatio: {
-                  value: safeDivide(safeGet(economicData, 'industrialOutput'), safeGet(economicData, 'industrialInvestment')),
-                  formula: "产业用地总产值/产业用地总投资",
-                  unit: "万元/万元"
-                }
-              };
-
-            case 'highTech':
-              // 高新区特色：亩均地税收
-              const landInMu = builtUrbanConstructionLand * 15; // 公顷转换为亩
-              return {
-                taxPerLand: {
-                  value: safeDivide(safeGet(economicData, 'totalTax'), landInMu),
-                  formula: "税收总额(万元)/已建成城镇建设用地面积(亩)",
-                  unit: "万元/亩"
-                }
-              };
-
-            case 'bonded':
-              // 综合保税区特色：固定资产投资占比
-              const totalFixedAssets = safeGet(bondedData, 'fixedAssetInvestment') + safeGet(economicData, 'fixedAssetInvestment', 0);
-              return {
-                fixedAssetInvestmentRatio: {
-                  value: safeDivide(totalFixedAssets, safeGet(bondedData, 'totalInvestment')) * 100,
-                  formula: "固定资产投资总额/总投资额 × 100%",
-                  unit: "%"
-                }
-              };
-
-            default:
-              // 其他开发区：单位面积产值
-              return {
-                outputPerLand: {
-                  value: safeDivide(safeGet(economicData, 'totalOutput'), builtUrbanConstructionLand),
-                  formula: "总产值(万元)/已建成城镇建设用地面积",
-                  unit: "万元/公顷"
-                }
-              };
-          }
-        }
 
         // 基于国家标准指标体系计算潜力数据
         function calculatePotentialByStandardIndicators(zoneName, zoneData, zoneType) {
