@@ -2487,9 +2487,9 @@ async function calculateZoneIndicators(areaName) {
           unit: "ratio"
         },
         buildingDensity: {
-          value: safeDivide(safeGet(buildingBaseData, 'buildingBaseArea', null), safeGet(landData, 'builtUrbanConstructionLand', null), null) * 100,
-          formula: "建筑基底面积/已建成城镇建设用地面积 × 100%",
-          unit: "%"
+          value: safeDivide(safeGet(buildingBaseData, 'buildingBaseArea', null), safeGet(landData, 'builtUrbanConstructionLand', null), null),
+          formula: "建筑基底面积/已建成城镇建设用地面积",
+          unit: "ratio"
         }
       },
       landUseIntensity: {
@@ -3347,38 +3347,126 @@ async function initializeServer() {
                   indicators['人均建设用地'] = Math.round((80 + Math.random() * 120) * 10) / 10;
                 }
 
-                // 计算综合评估分数
-                let totalScore = 0;
-                let scoreCount = 0;
+                // 按照国家标准指标体系计算综合评估分数
 
-                if (indicators['土地开发率'] > 0) {
-                  totalScore += Math.min(indicators['土地开发率'], 100);
-                  scoreCount++;
-                }
-                if (indicators['工业用地率'] > 0 && indicators['工业用地率'] <= 70) { // 工业用地率理想范围30-70%
-                  const rateScore = Math.max(0, 100 - Math.abs(indicators['工业用地率'] - 50) * 2);
-                  totalScore += rateScore;
-                  scoreCount++;
-                }
-                if (indicators['综合容积率'] > 0) {
-                  totalScore += Math.min(indicators['综合容积率'] * 50, 100); // 容积率转换为分数
-                  scoreCount++;
-                }
-                if (indicators['固定资产投资强度'] > 0) {
-                  totalScore += Math.min(indicators['固定资产投资强度'] / 2, 100); // 强度转换为分数
-                  scoreCount++;
-                }
-                if (indicators['土地闲置率'] >= 0) {
-                  const idleScore = Math.max(0, 100 - indicators['土地闲置率'] * 10); // 闲置率越低分数越高
-                  totalScore += idleScore;
-                  scoreCount++;
-                }
-                if (indicators['地均税收'] > 0) {
-                  totalScore += Math.min(indicators['地均税收'] * 5, 100); // 地均税收转换为分数
-                  scoreCount++;
+                // 1. 土地利用状况 (权重: 0.50)
+                let landUtilizationScore = 0;
+
+                // 1.1 土地开发程度 (权重: 0.2)
+                const landDevelopmentRate = indicators['土地开发率'] || 0;
+                const landDevelopmentScore = Math.min(landDevelopmentRate, 100); // 理想值: 100%
+
+                // 1.2 用地结构状况 (权重: 0.25) - 使用工业用地率
+                const industrialLandRate = indicators['工业用地率'] || 0;
+                // 工业用地率理想值60%，按照偏离理想值的程度计算分数
+                const industrialLandScore = Math.max(0, 100 - Math.abs(industrialLandRate - 60) * 2);
+
+                // 1.3 土地利用强度 (权重: 0.55)
+                const comprehensivePlotRatio = indicators['综合容积率'] || 0;
+                const industrialPlotRatio = indicators['工业用地综��容积率'] || 0;
+                const perCapitaConstructionLand = indicators['人均建设用地'] || 0;
+
+                // 根据不同开发区类型使用不同的理想值
+                const zoneType = determineZoneType(zoneName);
+                let idealComprehensivePlotRatio = 1.0; // 默认值
+                let idealIndustrialPlotRatio = 0.8;
+                let idealPerCapitaLand = 0.01; // 公顷/人
+
+                if (zoneType === 'economic') {
+                  idealComprehensivePlotRatio = 1.5;
+                  idealIndustrialPlotRatio = 1.2;
+                } else if (zoneType === 'highTech') {
+                  idealComprehensivePlotRatio = 1.5;
+                  idealIndustrialPlotRatio = 1.2;
+                } else if (zoneType === 'bonded') {
+                  idealComprehensivePlotRatio = 1.0;
+                  idealIndustrialPlotRatio = 0.8;
                 }
 
-                indicators['开发区综合评估分数'] = scoreCount > 0 ? Math.round((totalScore / scoreCount) * 10) / 10 : 75;
+                // 容积率评分：实际值/理想值 * 100，最高不超过100
+                const comprehensivePlotRatioScore = Math.min((comprehensivePlotRatio / idealComprehensivePlotRatio) * 100, 100);
+                const industrialPlotRatioScore = Math.min((industrialPlotRatio / idealIndustrialPlotRatio) * 100, 100);
+
+                // 人均建设用地是负向指标（越低越好）
+                const perCapitaLandScore = perCapitaConstructionLand > 0 ?
+                  Math.max(0, 100 - (perCapitaConstructionLand / idealPerCapitaLand - 1) * 100) : 0;
+
+                // 土地利用强度加权平均
+                const landUseIntensityScore = (comprehensivePlotRatioScore * 0.45 +
+                                             industrialPlotRatioScore * 0.45 +
+                                             perCapitaLandScore * 0.15);
+
+                // 土地利用状况总分
+                landUtilizationScore = (landDevelopmentScore * 0.2 +
+                                      industrialLandScore * 0.25 +
+                                      landUseIntensityScore * 0.55);
+
+                // 2. 用地效益 (权重: 0.20)
+                let economicBenefitScore = 0;
+
+                const fixedAssetInvestmentIntensity = indicators['固定资产投资强度'] || 0;
+                const enterpriseRevenuePerLand = indicators['地均企业收入'] || 0;
+                const commercialEnterpriseDensity = indicators['工商企业密度'] || 0;
+
+                // 根据开发区类型使用不同的理想值
+                let idealFixedAssetIntensity = 12000; // 万元/公顷
+                let idealEnterpriseRevenue = 20000;
+                let idealEnterpriseDensity = 50; // 家/公顷
+
+                if (zoneType === 'economic') {
+                  idealFixedAssetIntensity = 15000;
+                  idealEnterpriseRevenue = 20000;
+                } else if (zoneType === 'highTech') {
+                  idealFixedAssetIntensity = 15000;
+                  idealEnterpriseDensity = 50;
+                } else if (zoneType === 'bonded') {
+                  idealFixedAssetIntensity = 12000;
+                }
+
+                // 固定资产投资强度评分
+                const fixedAssetScore = Math.min((fixedAssetInvestmentIntensity / idealFixedAssetIntensity) * 100, 100);
+
+                // 根据开发区类型计算效益评分
+                if (zoneType === 'economic') {
+                  // 经开区：固定资产投资强度 + 地均企业收入
+                  const enterpriseRevenueScore = Math.min((enterpriseRevenuePerLand / idealEnterpriseRevenue) * 100, 100);
+                  economicBenefitScore = (fixedAssetScore * 0.7 + enterpriseRevenueScore * 0.3);
+                } else if (zoneType === 'highTech') {
+                  // 高新区：固定资产投资强度 + 工商企业密度
+                  const enterpriseDensityScore = Math.min((commercialEnterpriseDensity / idealEnterpriseDensity) * 100, 100);
+                  economicBenefitScore = (fixedAssetScore * 0.5 + enterpriseDensityScore * 0.5);
+                } else if (zoneType === 'bonded') {
+                  // 保税区：只用固定资产投资强度
+                  economicBenefitScore = fixedAssetScore;
+                } else {
+                  // 其他开发区：只用固定资产投资强度
+                  economicBenefitScore = fixedAssetScore;
+                }
+
+                // 3. 管理绩效 (权重: 0.15)
+                const landIdleRate = indicators['土地闲置率'] || 0;
+                // 土地闲置率是负向指标，理想值为0
+                const managementScore = Math.max(0, 100 - landIdleRate * 10);
+
+                // 4. 社会效益 (权重: 0.15)
+                const taxPerLand = indicators['地均税收'] || 0;
+                let idealTaxPerLand = 1200; // 万元/公顷
+
+                if (zoneType === 'economic' || zoneType === 'highTech') {
+                  idealTaxPerLand = 2000;
+                } else if (zoneType === 'bonded') {
+                  idealTaxPerLand = 1200;
+                }
+
+                const socialBenefitScore = Math.min((taxPerLand / idealTaxPerLand) * 100, 100);
+
+                // 综合得分计算
+                const finalScore = (landUtilizationScore * 0.50 +
+                                 economicBenefitScore * 0.20 +
+                                 managementScore * 0.15 +
+                                 socialBenefitScore * 0.15);
+
+                indicators['开发区综合评估分数'] = Math.round(finalScore * 10) / 10;
 
               } catch (indicatorError) {
                 console.warn(`获取${zoneName}实际指标数据失败，使用模拟数据:`, indicatorError.message);

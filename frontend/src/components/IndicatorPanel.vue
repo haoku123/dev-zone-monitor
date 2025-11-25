@@ -242,43 +242,139 @@ const overallScore = computed(() => {
     socialBenefit: 0.15            // 社会效益
   }
 
-  // 计算各维度得分（简化计算，实际应该有更复杂的评分标准）
-  const calculateDimensionScore = (dimension) => {
-    if (!indicators.value[dimension]) return 0
+  // 按照国家标准指标体系计算各维度得分
+  const calculateLandUtilizationScore = () => {
+    if (!indicators.value.landUtilizationStatus) return 0
 
-    const data = indicators.value[dimension]
-    let score = 0
-    let count = 0
+    const data = indicators.value.landUtilizationStatus
+    let totalScore = 0
 
-    // 遍历该维度的所有指标
-    const traverseIndicators = (obj) => {
-      for (const key in obj) {
-        if (typeof obj[key] === 'object' && obj[key] !== null) {
-          if (obj[key].value !== undefined) {
-            // 将比率转换为百分制得分
-            let value = obj[key].value
-            if (typeof value === 'number' && value <= 1) {
-              value = value * 100
-            }
-            score += Math.min(value, 100)
-            count++
-          } else {
-            traverseIndicators(obj[key])
-          }
-        }
-      }
+    // 1.1 土地开发程度 (权重: 0.2)
+    const landDevelopmentRate = data.landDevelopmentLevel?.landDevelopmentRate?.value || 0
+    const landDevelopmentScore = Math.min(landDevelopmentRate * 100, 100) // 理想值: 100%
+
+    // 1.2 用地结构状况 (权重: 0.25)
+    const industrialLandRate = data.landStructureStatus?.industrialLandRate?.value || 0
+    // 工业用地率理想值60%，按照偏离理想值的程度计算分数
+    const industrialLandScore = Math.max(0, 100 - Math.abs((industrialLandRate * 100) - 60) * 2)
+
+    // 1.3 土地利用强度 (权重: 0.55)
+    const comprehensivePlotRatio = data.landUseIntensity?.comprehensivePlotRatio?.value || 0
+    const industrialPlotRatio = data.landUseIntensity?.industrialPlotRatio?.value || 0
+    const perCapitaConstructionLand = data.landUseIntensity?.perCapitaConstructionLand?.value || 0
+
+    // 根据不同开发区类型使用不同的理想值
+    const zoneType = getZoneType()
+    let idealComprehensivePlotRatio = 1.0 // 默认值
+    let idealIndustrialPlotRatio = 0.8
+    let idealPerCapitaLand = 0.01 // 公顷/人
+
+    if (zoneType === 'economic') {
+      idealComprehensivePlotRatio = 1.5
+      idealIndustrialPlotRatio = 1.2
+    } else if (zoneType === 'highTech') {
+      idealComprehensivePlotRatio = 1.5
+      idealIndustrialPlotRatio = 1.2
+    } else if (zoneType === 'bonded') {
+      idealComprehensivePlotRatio = 1.0
+      idealIndustrialPlotRatio = 0.8
     }
 
-    traverseIndicators(data)
-    return count > 0 ? score / count : 0
+    // 容积率评分：实际值/理想值 * 100，最高不超过100
+    const comprehensivePlotRatioScore = Math.min((comprehensivePlotRatio / idealComprehensivePlotRatio) * 100, 100)
+    const industrialPlotRatioScore = Math.min((industrialPlotRatio / idealIndustrialPlotRatio) * 100, 100)
+
+    // 人均建设用地是负向指标（越低越好），单位转换为公顷
+    const perCapitaLandHectares = perCapitaConstructionLand / 10000
+    const perCapitaLandScore = perCapitaLandHectares > 0 ?
+      Math.max(0, 100 - (perCapitaLandHectares / idealPerCapitaLand - 1) * 100) : 0
+
+    // 土地利用强度加权平均
+    const landUseIntensityScore = (comprehensivePlotRatioScore * 0.45 +
+                                 industrialPlotRatioScore * 0.45 +
+                                 perCapitaLandScore * 0.15)
+
+    // 土地利用状况总分
+    totalScore = (landDevelopmentScore * 0.2 +
+                  industrialLandScore * 0.25 +
+                  landUseIntensityScore * 0.55)
+
+    return totalScore
+  }
+
+  const calculateEconomicBenefitScore = () => {
+    if (!indicators.value.economicBenefit?.outputBenefit) return 0
+
+    const outputData = indicators.value.economicBenefit.outputBenefit
+    const zoneType = getZoneType()
+
+    const fixedAssetInvestmentIntensity = outputData.fixedAssetInvestmentIntensity?.value || 0
+    const enterpriseRevenuePerLand = outputData.commercialEnterpriseDensity?.value || 0 // 这里用地均企业收入
+
+    // 根据开发区类型使用不同的理想值
+    let idealFixedAssetIntensity = 12000 // 万元/公顷
+    let idealEnterpriseRevenue = 20000
+
+    if (zoneType === 'economic') {
+      idealFixedAssetIntensity = 15000
+    } else if (zoneType === 'highTech') {
+      idealFixedAssetIntensity = 15000
+    } else if (zoneType === 'bonded') {
+      idealFixedAssetIntensity = 12000
+    }
+
+    // 固定资产投资强度评分
+    const fixedAssetScore = Math.min((fixedAssetInvestmentIntensity / idealFixedAssetIntensity) * 100, 100)
+
+    // 根据开发区类型计算效益评分
+    let economicBenefitScore = 0
+    if (zoneType === 'economic') {
+      // 经开区：固定资产投资强度 + 地均企业收入
+      const enterpriseRevenueScore = Math.min((enterpriseRevenuePerLand / idealEnterpriseRevenue) * 100, 100)
+      economicBenefitScore = (fixedAssetScore * 0.7 + enterpriseRevenueScore * 0.3)
+    } else if (zoneType === 'highTech') {
+      // 高新区：固定资产投资强度 + 工商企业密度
+      const commercialDensity = outputData.commercialEnterpriseDensity?.value || 0
+      const commercialDensityScore = Math.min((commercialDensity / 50) * 100, 100) // 理想值50家/公顷
+      economicBenefitScore = (fixedAssetScore * 0.5 + commercialDensityScore * 0.5)
+    } else {
+      // 其他开发区：只用固定资产投资强度
+      economicBenefitScore = fixedAssetScore
+    }
+
+    return economicBenefitScore
+  }
+
+  const calculateManagementScore = () => {
+    if (!indicators.value.managementPerformance?.landUseSupervisionPerformance) return 0
+
+    const landIdleRate = indicators.value.managementPerformance.landUseSupervisionPerformance.landIdleRate?.value || 0
+    // 土地闲置率是负向指标，理想值为0
+    return Math.max(0, 100 - landIdleRate * 100 * 10) // landIdleRate是比率，乘以100转换为百分比
+  }
+
+  const calculateSocialBenefitScore = () => {
+    if (!indicators.value.socialBenefit?.socialBenefitIndicators) return 0
+
+    const taxPerLand = indicators.value.socialBenefit.socialBenefitIndicators.taxPerLand?.value || 0
+    const zoneType = getZoneType()
+    let idealTaxPerLand = 1200 // 万元/公顷
+
+    if (zoneType === 'economic' || zoneType === 'highTech') {
+      idealTaxPerLand = 2000
+    } else if (zoneType === 'bonded') {
+      idealTaxPerLand = 1200
+    }
+
+    return Math.min((taxPerLand / idealTaxPerLand) * 100, 100)
   }
 
   // 计算各维度得分
   const scores = {
-    landUtilizationStatus: calculateDimensionScore('landUtilizationStatus'),
-    economicBenefit: calculateDimensionScore('economicBenefit'),
-    managementPerformance: calculateDimensionScore('managementPerformance'),
-    socialBenefit: calculateDimensionScore('socialBenefit')
+    landUtilizationStatus: calculateLandUtilizationScore(),
+    economicBenefit: calculateEconomicBenefitScore(),
+    managementPerformance: calculateManagementScore(),
+    socialBenefit: calculateSocialBenefitScore()
   }
 
   // 计算加权总分
